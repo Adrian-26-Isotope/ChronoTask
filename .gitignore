@@ -26,6 +26,7 @@ replay_pid*
 # binaries
 /bin/
 /.bin/
+/target/
 
 # IDE specifics
 /.settings/

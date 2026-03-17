@@ -2,7 +2,6 @@ package adrian.os.java.timer;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -262,7 +261,8 @@ public class TimedTask {
             }
             else {
                 // PERIODIC DELAY SCENARIO
-                Thread.sleep(Duration.between(LocalTime.now(), getNextExecution()));
+                Duration duration = Duration.between(LocalDateTime.now(), getNextExecution());
+                Thread.sleep(duration);
                 // timer thread sleeps
                 // task thread terminates once finished
             }

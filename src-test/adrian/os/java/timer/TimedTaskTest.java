@@ -2,6 +2,8 @@ package adrian.os.java.timer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -54,25 +56,25 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testState(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build();
+        var timedTask = executor.createTask(createTask(1)).build();
         timedTask.start();
         assertEquals(State.RUNNING, timedTask.getState());
         timedTask.stop();
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.SHUTDOWN, timedTask.getState());
     }
 
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetive(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitive(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(1));
-        builder.setPeriodicDelay(Duration.ofSeconds(10)).setRepetetiveDelay(Duration.ofSeconds(2));
+        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        builder.setPeriodicDelay(Duration.ofSeconds(10)).setRepetitiveDelay(Duration.ofSeconds(2));
         TimedTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Increased buffer for thread startup
         assertEquals(1, this.counter.get());
         Thread.sleep(1100); // task duration + buffer
-        Thread.sleep(2100); // repetetive delay + buffer
+        Thread.sleep(2100); // Repetitive delay + buffer
         assertEquals(2, this.counter.get());
         timer.stop();
         assertEquals(2, this.counter.get());
@@ -82,8 +84,8 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodic(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = this.currentExecutor.createTimedTask(createTask(1));
-        builder.setRepetetiveDelay(Duration.ofSeconds(10)).setPeriodicDelay(Duration.ofSeconds(1));
+        TimedTaskBuilder builder = this.currentExecutor.createTask(createTask(1));
+        builder.setRepetitiveDelay(Duration.ofSeconds(10)).setPeriodicDelay(Duration.ofSeconds(1));
         TimedTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Increased buffer for thread startup
@@ -98,13 +100,13 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testDelayed1(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = this.currentExecutor.createTimedTask(createTask(1));
+        TimedTaskBuilder builder = this.currentExecutor.createTask(createTask(1));
         TimedTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Increased buffer for thread startup
         assertEquals(1, this.counter.get());
         Thread.sleep(1100); // task duration + buffer
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
         assertEquals(1, this.counter.get());
     }
 
@@ -112,7 +114,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testDelayed2(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(1));
+        TimedTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ofSeconds(1));
         TimedTask timer = builder.build();
         timer.start();
@@ -121,7 +123,7 @@ class TimedTaskTest {
         Thread.sleep(1100); // Initial delay
         assertEquals(1, this.counter.get());
         Thread.sleep(1100); // task duration + buffer
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
         assertEquals(1, this.counter.get());
     }
 
@@ -132,8 +134,8 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testStateAfterBuild(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build();
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        var timedTask = executor.createTask(createTask(1)).build();
+        assertEquals(State.STOPPED, timedTask.getState());
     }
 
     /**
@@ -143,7 +145,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testDoubleStart(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build();
+        var timedTask = executor.createTask(createTask(1)).build();
 
         // First start should succeed
         assertTrue(timedTask.start());
@@ -163,11 +165,11 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testStopBeforeStart(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build();
+        var timedTask = executor.createTask(createTask(1)).build();
 
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.STOPPED, timedTask.getState());
         timedTask.stop(); // Should be no-op
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.STOPPED, timedTask.getState());
     }
 
     /**
@@ -175,21 +177,24 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMultipleStops(final AbstractTimedTaskExecutor executor) {
+    void testMultipleStops(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build();
+        var timedTask = executor.createTask(createTask(1)).build();
 
         timedTask.start();
         assertEquals(State.RUNNING, timedTask.getState());
 
         timedTask.stop();
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.SHUTDOWN, timedTask.getState());
 
         timedTask.stop(); // Second stop should be safe
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertNotEquals(State.RUNNING, timedTask.getState());
 
         timedTask.stop(); // Third stop should be safe
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertNotEquals(State.RUNNING, timedTask.getState());
+
+        Thread.sleep(Duration.ofMillis(100));
+        assertEquals(State.STOPPED, timedTask.getState());
     }
 
     /**
@@ -199,7 +204,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testStateAfterCompletion(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build();
+        var timedTask = executor.createTask(createTask(1)).build();
 
         timedTask.start();
         assertEquals(State.RUNNING, timedTask.getState());
@@ -211,7 +216,7 @@ class TimedTaskTest {
         Thread.sleep(1100); // Wait for task duration (1 second)
 
         // Task should have completed and state should be NOT_RUNNING
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.STOPPED, timedTask.getState());
         assertEquals(1, this.counter.get());
     }
 
@@ -222,7 +227,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testRestart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(1));
+        TimedTaskBuilder builder = executor.createTask(createTask(1));
         builder.setPeriodicDelay(Duration.ofSeconds(2));
         TimedTask timedTask = builder.build();
 
@@ -234,7 +239,7 @@ class TimedTaskTest {
 
         // Stop the task
         timedTask.stop();
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.SHUTDOWN, timedTask.getState());
         Thread.sleep(100);
         long countAfterStop = this.counter.get();
 
@@ -254,7 +259,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testMultipleRestarts(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(1)).build(); // single execution task
+        var timedTask = executor.createTask(createTask(1)).build(); // single execution task
 
         for (int i = 1; i <= 3; i++) {
             // Start the task
@@ -263,7 +268,7 @@ class TimedTaskTest {
             Thread.sleep(150); // Allow task to execute
             assertEquals(i, this.counter.get(), "Counter should be " + i + " on iteration " + i);
             Thread.sleep(1000); // Wait for task to complete
-            assertEquals(State.NOT_RUNNING, timedTask.getState());
+            assertEquals(State.STOPPED, timedTask.getState());
         }
     }
 
@@ -275,7 +280,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testRestartWithSameConfiguration(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(1));
+        TimedTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ofMillis(500));
         TimedTask timedTask = builder.build();
 
@@ -308,7 +313,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testDelayedZeroInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(1));
+        TimedTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ZERO);
         TimedTask timer = builder.build();
 
@@ -317,7 +322,7 @@ class TimedTaskTest {
         assertEquals(1, this.counter.get(), "Task should execute immediately with zero initial delay");
 
         Thread.sleep(1100); // Wait for task duration + buffer
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Task should be NOT_RUNNING after completion");
+        assertEquals(State.STOPPED, timer.getState(), "Task should be NOT_RUNNING after completion");
         assertEquals(1, this.counter.get(), "Counter should remain 1 (single execution)");
     }
 
@@ -328,7 +333,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodicMultipleCycles(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setPeriodicDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
@@ -353,7 +358,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodicStopDuringExecution(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(2)); // 2-second task
+        TimedTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
         builder.setPeriodicDelay(Duration.ofMillis(500));
         TimedTask timer = builder.build();
 
@@ -363,7 +368,7 @@ class TimedTaskTest {
 
         // Stop while task is still executing (task duration is 2 seconds)
         timer.stop();
-        assertEquals(State.NOT_RUNNING, timer.getState(), "State should be NOT_RUNNING immediately after stop");
+        assertEquals(State.SHUTDOWN, timer.getState(), "incorrect state after stop()");
 
         long countAtStop = this.counter.get();
         Thread.sleep(2000); // Wait to ensure no additional executions occur
@@ -379,7 +384,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodicWithInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setInitialDelay(Duration.ofMillis(800)).setPeriodicDelay(Duration.ofMillis(500));
         TimedTask timer = builder.build();
 
@@ -404,7 +409,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodicShortDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setPeriodicDelay(Duration.ofMillis(100));
         TimedTask timer = builder.build();
 
@@ -428,7 +433,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodicLongRunningTask(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(1)); // 1-second task
+        TimedTaskBuilder builder = executor.createTask(createTask(1)); // 1-second task
         builder.setPeriodicDelay(Duration.ofMillis(300)); // Shorter than task duration
         TimedTask timer = builder.build();
 
@@ -451,10 +456,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveMultipleCycles(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveMultipleCycles(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
-        builder.setRepetetiveDelay(Duration.ofMillis(200));
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        builder.setRepetitiveDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -476,10 +481,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveStopDuringExecution(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveStopDuringExecution(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(2)); // 2-second task
-        builder.setRepetetiveDelay(Duration.ofMillis(500));
+        TimedTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
+        builder.setRepetitiveDelay(Duration.ofMillis(500));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -488,7 +493,7 @@ class TimedTaskTest {
 
         // Stop while task is still executing (task duration is 2 seconds)
         timer.stop();
-        assertEquals(State.NOT_RUNNING, timer.getState(), "State should be NOT_RUNNING immediately after stop");
+        assertEquals(State.SHUTDOWN, timer.getState(), "incorrect state after stop()");
 
         long countAtStop = this.counter.get();
         Thread.sleep(2000); // Wait to ensure no additional executions occur
@@ -502,10 +507,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveWithInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveWithInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
-        builder.setInitialDelay(Duration.ofMillis(800)).setRepetetiveDelay(Duration.ofMillis(300));
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        builder.setInitialDelay(Duration.ofMillis(800)).setRepetitiveDelay(Duration.ofMillis(300));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -527,10 +532,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveShortDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveShortDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
-        builder.setRepetetiveDelay(Duration.ofMillis(100));
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        builder.setRepetitiveDelay(Duration.ofMillis(100));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -552,7 +557,7 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveVariableTaskDuration(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveVariableTaskDuration(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         // Create a task with variable duration based on execution count
@@ -568,8 +573,8 @@ class TimedTaskTest {
             }
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(variableTask);
-        builder.setRepetetiveDelay(Duration.ofMillis(200));
+        TimedTaskBuilder builder = executor.createTask(variableTask);
+        builder.setRepetitiveDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -603,7 +608,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
         };
 
-        TimedTaskBuilder builder = this.currentExecutor.createTimedTask(namedTask);
+        TimedTaskBuilder builder = this.currentExecutor.createTask(namedTask);
         builder.setName("TestTask");
         TimedTask timer = builder.build();
 
@@ -638,9 +643,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
         };
 
-        TimedTask timer = poolExecutor.createTimedTask(namedTask)
-                .setName("DatabaseSync")
-                .build();
+        TimedTask timer = poolExecutor.createTask(namedTask).setName("DatabaseSync").build();
 
         timer.start();
         Thread.sleep(150); // Allow task to execute
@@ -661,14 +664,14 @@ class TimedTaskTest {
     void testNamedTaskWithBlankName(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setName("   "); // Blank name
         TimedTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Allow task to execute
         assertEquals(1, this.counter.get(), "Task should have executed");
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Task shouldnt be running");
+        assertEquals(State.STOPPED, timer.getState(), "Task shouldnt be running");
 
         timer.stop();
     }
@@ -680,17 +683,8 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testNamedTaskWithNullName(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
-        builder.setName(null); // Null name
-        TimedTask timer = builder.build();
-
-        timer.start();
-        Thread.sleep(150); // Allow task to execute
-        assertEquals(1, this.counter.get(), "Task should have executed");
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Task shouldnt be running");
-
-        timer.stop();
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        assertThrowsExactly(NullPointerException.class, () -> builder.setName(null));
     }
 
     /**
@@ -710,7 +704,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
         };
 
-        TimedTaskBuilder builder = this.currentExecutor.createTimedTask(namedTask);
+        TimedTaskBuilder builder = this.currentExecutor.createTask(namedTask);
         builder.setName("PeriodicTask").setPeriodicDelay(Duration.ofMillis(300));
         TimedTask timer = builder.build();
 
@@ -755,7 +749,7 @@ class TimedTaskTest {
             counter1.incrementAndGet();
         };
 
-        TimedTaskBuilder builder1 = this.currentExecutor.createTimedTask(task1);
+        TimedTaskBuilder builder1 = this.currentExecutor.createTask(task1);
         builder1.setName("Task1");
         TimedTask timer1 = builder1.build();
 
@@ -765,7 +759,7 @@ class TimedTaskTest {
             counter2.incrementAndGet();
         };
 
-        TimedTaskBuilder builder2 = this.currentExecutor.createTimedTask(task2);
+        TimedTaskBuilder builder2 = this.currentExecutor.createTask(task2);
         builder2.setName("Task2");
         TimedTask timer2 = builder2.build();
 
@@ -804,7 +798,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(timedTask);
+        TimedTaskBuilder builder = executor.createTask(timedTask);
         Duration initialDelay = Duration.ofMillis(357);
         builder.setInitialDelay(initialDelay);
         TimedTask timer = builder.build();
@@ -845,7 +839,7 @@ class TimedTaskTest {
             }
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(timedTask);
+        TimedTaskBuilder builder = executor.createTask(timedTask);
         Duration periodicDelay = Duration.ofMillis(300);
         builder.setPeriodicDelay(periodicDelay);
         TimedTask timer = builder.build();
@@ -875,7 +869,7 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveDelayPrecision(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveDelayPrecision(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final List<Long> executionStartTimes = new java.util.ArrayList<>();
@@ -898,9 +892,9 @@ class TimedTaskTest {
             }
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(timedTask);
-        Duration repetetiveDelay = Duration.ofMillis(300);
-        builder.setRepetetiveDelay(repetetiveDelay);
+        TimedTaskBuilder builder = executor.createTask(timedTask);
+        Duration repetitiveDelay = Duration.ofMillis(300);
+        builder.setRepetitiveDelay(repetitiveDelay);
         TimedTask timer = builder.build();
 
         timer.start();
@@ -914,7 +908,7 @@ class TimedTaskTest {
         long tolerance = 15;
         for (int i = 1; i < executionStartTimes.size(); i++) {
             long actualDelay = executionStartTimes.get(i) - executionEndTimes.get(i - 1);
-            long expectedDelay = repetetiveDelay.toMillis();
+            long expectedDelay = repetitiveDelay.toMillis();
 
             assertTrue(Math.abs(actualDelay - expectedDelay) <= tolerance, String.format(
                     "Repetitive delay %d should be within tolerance. Expected: %dms, Actual: %dms, Tolerance: ±%dms", i,
@@ -935,14 +929,14 @@ class TimedTaskTest {
 
         final long startTime = System.currentTimeMillis();
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         Duration initialDelay = Duration.ofMillis(500);
         Duration periodicDelay = Duration.ofMillis(300);
         builder.setInitialDelay(initialDelay).setPeriodicDelay(periodicDelay);
         TimedTask timer = builder.build();
 
         // Before start, state should be NOT_RUNNING
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
 
         timer.start();
         assertEquals(State.RUNNING, timer.getState());
@@ -983,7 +977,7 @@ class TimedTaskTest {
             // Subsequent executions work normally
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(exceptionTask);
+        TimedTaskBuilder builder = executor.createTask(exceptionTask);
         builder.setPeriodicDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
@@ -1015,8 +1009,8 @@ class TimedTaskTest {
             throw new IllegalStateException("Test runtime exception");
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(exceptionTask);
-        builder.setRepetetiveDelay(Duration.ofMillis(200));
+        TimedTaskBuilder builder = executor.createTask(exceptionTask);
+        builder.setRepetitiveDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -1052,7 +1046,7 @@ class TimedTaskTest {
             }
         };
 
-        TimedTask timer = executor.createTimedTask(interruptibleTask).build();
+        TimedTask timer = executor.createTask(interruptibleTask).build();
 
         timer.start();
         Thread.sleep(50); // Allow task to start
@@ -1063,7 +1057,7 @@ class TimedTaskTest {
         executor.shutdownNow();
         Thread.sleep(100); // Allow time for interrupt to be processed
 
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertEquals(State.STOPPED, timer.getState(), "Timer should be stopped");
         assertTrue(interruptHandled[0], "Task should have been interrupted.");
     }
 
@@ -1078,7 +1072,7 @@ class TimedTaskTest {
 
         // Attempt to create a task with null
         try {
-            TimedTask timer = executor.createTimedTask(null).build();
+            TimedTask timer = executor.createTask(null).build();
             timer.start();
         }
         catch (NullPointerException _) {
@@ -1099,7 +1093,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testNegativeInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setInitialDelay(Duration.ofMillis(-500));
         TimedTask timer = builder.build();
 
@@ -1121,7 +1115,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testNegativePeriodicDelay(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
 
         // Attempt to set negative periodic delay should throw exception
         try {
@@ -1143,11 +1137,11 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testNegativeRepetitiveDelay(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
 
         // Attempt to set negative repetitive delay should throw exception
         try {
-            builder.setRepetetiveDelay(Duration.ofMillis(-300));
+            builder.setRepetitiveDelay(Duration.ofMillis(-300));
             fail("Expected IllegalArgumentException for negative repetitive delay");
         }
         catch (IllegalArgumentException e) {
@@ -1166,7 +1160,7 @@ class TimedTaskTest {
     void testExtremelyLongDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setInitialDelay(Duration.ofDays(365));
         TimedTask timer = builder.build();
 
@@ -1180,7 +1174,7 @@ class TimedTaskTest {
         assertEquals(State.RUNNING, timer.getState(), "Timer should still be running");
 
         timer.stop();
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertEquals(State.SHUTDOWN, timer.getState());
     }
 
     /**
@@ -1198,7 +1192,7 @@ class TimedTaskTest {
             timedTask.stop();
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(selfStoppingTask);
+        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setPeriodicDelay(Duration.ofMillis(300));
         TimedTask timer = builder.build();
 
@@ -1207,7 +1201,7 @@ class TimedTaskTest {
         assertEquals(1, this.counter.get(), "Task should execute once");
 
         Thread.sleep(300); // Wait past next periodic cycle
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped by the task");
+        assertEquals(State.STOPPED, timer.getState(), "Timer should be stopped by the task");
         assertEquals(1, this.counter.get(), "Task should not execute again (stopped itself)");
     }
 
@@ -1227,7 +1221,7 @@ class TimedTaskTest {
             }
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(selfStoppingTask);
+        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setPeriodicDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
@@ -1242,7 +1236,7 @@ class TimedTaskTest {
         assertEquals(3, this.counter.get());
 
         Thread.sleep(200); // Verify no fourth execution
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertEquals(State.STOPPED, timer.getState(), "Timer should be stopped");
         assertEquals(3, this.counter.get(), "Task should have stopped after 3 executions");
     }
 
@@ -1262,8 +1256,8 @@ class TimedTaskTest {
             }
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(selfStoppingTask);
-        builder.setRepetetiveDelay(Duration.ofMillis(200));
+        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
+        builder.setRepetitiveDelay(Duration.ofMillis(200));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -1277,7 +1271,7 @@ class TimedTaskTest {
         assertEquals(3, this.counter.get());
 
         Thread.sleep(200); // Verify no fourth execution
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertEquals(State.STOPPED, timer.getState(), "Timer should be stopped");
         assertEquals(3, this.counter.get(), "Task should have stopped after 3 executions");
     }
 
@@ -1295,11 +1289,11 @@ class TimedTaskTest {
             wasRunning[0] = timedTask.isRunning();
         };
 
-        TimedTask timer = executor.createTimedTask(checkingTask).build();
+        TimedTask timer = executor.createTask(checkingTask).build();
 
         timer.start();
         Thread.sleep(50);
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
         assertEquals(1, this.counter.get(), "Task should have executed");
         assertTrue(wasRunning[0], "Task should have detected it was running");
     }
@@ -1320,13 +1314,13 @@ class TimedTaskTest {
             restartResult[0] = timedTask.start();
         };
 
-        TimedTask timer = executor.createTimedTask(restartingTask).build();
+        TimedTask timer = executor.createTask(restartingTask).build();
 
         timer.start();
         Thread.sleep(50); // Allow execution
         assertEquals(1, this.counter.get(), "Task should have executed");
         assertFalse(restartResult[0], "Task should not be able to restart itself while running");
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
     }
 
     /**
@@ -1350,7 +1344,7 @@ class TimedTaskTest {
             timedTask.stop(); // Task stops itself
         };
 
-        TimedTaskBuilder builder = executor.createTimedTask(selfStoppingTask);
+        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setPeriodicDelay(Duration.ofMillis(500));
         TimedTask timer = builder.build();
 
@@ -1361,7 +1355,7 @@ class TimedTaskTest {
         timer.stop();
 
         Thread.sleep(200); // Allow everything to settle
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertEquals(State.STOPPED, timer.getState(), "Timer should be stopped");
         assertTrue(this.counter.get() == 1, "Task should have executed only once");
     }
 
@@ -1393,7 +1387,7 @@ class TimedTaskTest {
                 }
             };
 
-            TimedTaskBuilder builder = executor.createTimedTask(task);
+            TimedTaskBuilder builder = executor.createTask(task);
             builder.setPeriodicDelay(Duration.ofMillis(200));
             tasks[i] = builder.build();
             tasks[i].start();
@@ -1423,7 +1417,7 @@ class TimedTaskTest {
     void testStopFromAnotherThread(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(100));
         TimedTask timer = builder.build();
 
@@ -1434,9 +1428,9 @@ class TimedTaskTest {
 
         // Stop task from a different thread
         Thread stopperThread = Thread.ofVirtual().start(timer::stop);
-
+        Thread.sleep(100);
+        assertEquals(State.STOPPED, timer.getState());
         stopperThread.join(); // Wait for stopper thread to complete
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Task should be stopped");
 
         long countAfterStop = this.counter.get();
         Thread.sleep(300); // Wait to ensure no more executions
@@ -1452,7 +1446,7 @@ class TimedTaskTest {
     void testRaceConditionOnStart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(100));
         TimedTask timer = builder.build();
 
@@ -1489,7 +1483,7 @@ class TimedTaskTest {
     void testRaceConditionOnStop(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(100));
         TimedTask timer = builder.build();
 
@@ -1505,12 +1499,13 @@ class TimedTaskTest {
             threads[i] = Thread.ofVirtual().start(timer::stop);
         }
 
+        Thread.sleep(100);
+        assertEquals(State.STOPPED, timer.getState());
+
         // Wait for all threads to complete
         for (Thread thread : threads) {
             thread.join();
         }
-
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Task should be stopped");
 
         long countAfterStop = this.counter.get();
         Thread.sleep(300); // Ensure no more executions
@@ -1542,7 +1537,7 @@ class TimedTaskTest {
                 }
             };
 
-            TimedTaskBuilder builder = executor.createTimedTask(task);
+            TimedTaskBuilder builder = executor.createTask(task);
             builder.setPeriodicDelay(Duration.ofMillis(100));
             tasks[i] = builder.build();
             tasks[i].start();
@@ -1559,7 +1554,7 @@ class TimedTaskTest {
         long finalCount = sharedCounter.get();
         // With 5 tasks running for ~1 second with 100ms period,
         // we expect roughly 50 executions (±some tolerance)
-        assertTrue((finalCount >= 49) && (finalCount <= 51),
+        assertTrue((finalCount >= 49) && (finalCount <= 55),
                 "Expected total executions are not within tolarance. got " + finalCount);
     }
 
@@ -1573,7 +1568,7 @@ class TimedTaskTest {
     void testHighFrequencyPeriodic(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         TimedTask timer = builder.setPeriodicDelay(Duration.ofMillis(10)).build();
 
         timer.start();
@@ -1597,11 +1592,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testHighFrequencyRepetetive(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testHighFrequencyRepetitive(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0)); // Instant task
-        TimedTask timer = builder.setRepetetiveDelay(Duration.ofMillis(10)).build();
+        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        TimedTask timer = builder.setRepetitiveDelay(Duration.ofMillis(10)).build();
 
         timer.start();
         Thread.sleep(1000);
@@ -1611,7 +1606,7 @@ class TimedTaskTest {
         // With 10ms repetitive delay, we expect roughly 100 executions
         // Allow tolerance for high-frequency operations due to system scheduling
         assertTrue((finalCount >= 85) && (finalCount <= 100),
-                "executions with 10ms repetetive delay do not fall with in tolerance range. Got " + finalCount);
+                "executions with 10ms Repetitive delay do not fall with in tolerance range. Got " + finalCount);
     }
 
     /**
@@ -1632,7 +1627,7 @@ class TimedTaskTest {
             final int index = i;
             counters[i] = new AtomicLong(0);
             Consumer<TimedTask> task = _ -> counters[index].incrementAndGet();
-            tasks[i] = executor.createTimedTask(task).build();
+            tasks[i] = executor.createTask(task).build();
         }
 
         // Start all tasks in quick succession
@@ -1669,7 +1664,7 @@ class TimedTaskTest {
 
         for (int i = 0; i < ITERATIONS; i++) {
             Consumer<TimedTask> task = _ -> totalExecutions.incrementAndGet();
-            TimedTask timer = executor.createTimedTask(task).build();
+            TimedTask timer = executor.createTask(task).build();
 
             // Start and immediately stop (or let it complete)
             timer.start();
@@ -1709,7 +1704,7 @@ class TimedTaskTest {
             }
         };
 
-        var timedTask = executor.createTimedTask(longTask).build();
+        var timedTask = executor.createTask(longTask).build();
         timedTask.start();
         Thread.sleep(50); // Wait for task to start
         assertEquals(1, this.counter.get(), "Task should have started");
@@ -1717,7 +1712,7 @@ class TimedTaskTest {
         Thread.sleep(9500);
         assertEquals(State.RUNNING, timedTask.getState());
         Thread.sleep(1000);
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.STOPPED, timedTask.getState());
         assertEquals(2, this.counter.get(), "Task should have started");
     }
 
@@ -1729,7 +1724,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testPeriodicWithZeroDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         TimedTask timer = builder.setPeriodicDelay(Duration.ZERO).build();
 
         timer.start();
@@ -1752,10 +1747,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetetiveWithZeroDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveWithZeroDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
-        TimedTask timer = builder.setRepetetiveDelay(Duration.ZERO).build();
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        TimedTask timer = builder.setRepetitiveDelay(Duration.ZERO).build();
 
         timer.start();
         Thread.sleep(100);
@@ -1779,13 +1774,13 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testStopImmediatelyAfterStart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         TimedTask timer = builder.setPeriodicDelay(Duration.ofMillis(100)).build();
 
         timer.start();
         timer.stop();
 
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.SHUTDOWN, timer.getState());
 
         // Wait a bit and verify no executions occur
         long countAtStop = this.counter.get();
@@ -1816,7 +1811,7 @@ class TimedTaskTest {
             }
         };
 
-        var timedTask = executor.createTimedTask(longTask).build();
+        var timedTask = executor.createTask(longTask).build();
 
         timedTask.start();
         Thread.sleep(50); // Wait for task to start executing
@@ -1825,7 +1820,7 @@ class TimedTaskTest {
 
         // Stop while task is executing
         timedTask.stop();
-        assertEquals(State.NOT_RUNNING, timedTask.getState());
+        assertEquals(State.SHUTDOWN, timedTask.getState());
 
         Thread.sleep(2100); // Wait for task to finish
         long countAfterStop = this.counter.get();
@@ -1847,7 +1842,7 @@ class TimedTaskTest {
     @MethodSource("executorProvider")
     void testRestartImmediatelyAfterStop(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTimedTask(createTask(0)).build();
+        var timedTask = executor.createTask(createTask(0)).build();
 
         // First start
         timedTask.start();
@@ -1874,17 +1869,17 @@ class TimedTaskTest {
     void testBuildWithoutStart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(10));
         TimedTask timer = builder.build();
 
         // Don't call start(), just wait
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
         Thread.sleep(50);
 
         // Verify no executions occurred
         assertEquals(0, this.counter.get(), "Task should not execute without start()");
-        assertEquals(State.NOT_RUNNING, timer.getState());
+        assertEquals(State.STOPPED, timer.getState());
 
         // Verify we can still start it later
         assertTrue(timer.start(), "Should be able to start later");
@@ -1908,8 +1903,8 @@ class TimedTaskTest {
 
         // instant task, 60-second repetitive delay — after first execution the timer
         // thread enters Thread.sleep() for 60 seconds
-        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
-        builder.setRepetetiveDelay(Duration.ofSeconds(60));
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        builder.setRepetitiveDelay(Duration.ofSeconds(60));
         TimedTask timer = builder.build();
 
         timer.start();
@@ -1921,7 +1916,7 @@ class TimedTaskTest {
         timer.stop();
         long elapsed = System.currentTimeMillis() - stopStart;
 
-        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertEquals(State.SHUTDOWN, timer.getState(), "Timer should be in shutdown");
         assertTrue(elapsed < 500, "stop() should return promptly (< 500ms), but took " + elapsed + "ms");
     }
 

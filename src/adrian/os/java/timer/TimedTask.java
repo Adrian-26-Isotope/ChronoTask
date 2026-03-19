@@ -13,7 +13,9 @@ public class TimedTask {
 
     @SuppressWarnings("javadoc")
     protected enum State {
-        RUNNING, NOT_RUNNING;
+                          RUNNING,
+                          SHUTDOWN,
+                          STOPPED;
     }
 
     /* mandatory fields */
@@ -30,7 +32,7 @@ public class TimedTask {
     private long count = 0;
     private final Timer timer = new Timer();
     private volatile LocalDateTime nextExecution;
-    private volatile State state = State.NOT_RUNNING;
+    private volatile State state = State.STOPPED;
     private final Object executionLock = new Object();
 
 
@@ -46,7 +48,17 @@ public class TimedTask {
      * start the timer thread.
      */
     public synchronized boolean start() {
-        if (!isRunning()) {
+        while (getState() == State.SHUTDOWN) {
+            try {
+                wait();
+            }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+
+        if (getState() == State.STOPPED) {
             setState(State.RUNNING);
             setNextExecutionTime(LocalDateTime.now().plus(this.initialDelay));
             if ((this.name == null) || this.name.isBlank()) {
@@ -58,7 +70,8 @@ public class TimedTask {
             }
             return true;
         }
-        return false;
+
+        return false; // task is still running --> cannot be started again.
     }
 
     /**
@@ -67,7 +80,7 @@ public class TimedTask {
      */
     public synchronized void stop() {
         if (isRunning()) {
-            setState(State.NOT_RUNNING);
+            setState(State.SHUTDOWN);
             // notify waiting timer thread
             setNextExecutionTime(null);
             // interrupt sleeping timer thread
@@ -170,21 +183,28 @@ public class TimedTask {
 
         private void runTimer() {
             this.timerThread = Thread.currentThread();
-            if (!isRunning()) {
-                return;
-            }
             try {
+                if (!isRunning()) {
+                    return;
+                }
                 loopTimer();
             }
             finally {
-                setState(State.NOT_RUNNING);
+                // deliberately clear the interrupt state. in case of a pool thread, the thread can safely be reused.
+                Thread.interrupted();
+
+                synchronized (TimedTask.this) {
+                    setState(State.STOPPED);
+                    // notify potential waiting restart.
+                    TimedTask.this.notifyAll();
+                }
             }
         }
 
         private void loopTimer() {
             try {
                 LocalDateTime next;
-                while (isAlive() && (next = getNextExecution()) != null) {
+                while (isAlive() && ((next = getNextExecution()) != null)) {
                     if (next.compareTo(LocalDateTime.now()) <= 0) {
                         calculatePeriodicExecutionTime(next);
                         executeTask();

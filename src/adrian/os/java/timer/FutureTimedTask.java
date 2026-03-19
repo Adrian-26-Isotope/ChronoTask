@@ -16,7 +16,7 @@ import java.util.function.Function;
  * following execution so callers can chain results without a race.
  * </p>
  * <p>
- * Instances are created via {@link AbstractTimedTaskExecutor#createTask(task)}.
+ * Instances are created via {@link AbstractTimedTaskExecutor#createFutureTask(Function)}.
  * </p>
  *
  * @param <T> the type of the result produced by the task.
@@ -28,8 +28,8 @@ public class FutureTimedTask<T> {
     private volatile T lastResult;
 
     /**
-     * @param task     the function to execute on each trigger; receives this task
-     *                 instance as argument.
+     * @param task the function to execute on each trigger; receives this task
+     *            instance as argument.
      * @param executor the executor that runs the underlying timer and task threads.
      */
     FutureTimedTask(final Function<FutureTimedTask<T>, T> task, final AbstractTimedTaskExecutor executor) {
@@ -63,10 +63,11 @@ public class FutureTimedTask<T> {
         if (isRunning()) {
             return null;
         }
-        CompletableFuture<T> fresh = new CompletableFuture<>();
-        this.nextResult.set(fresh);
+        // CompletableFuture<T> fresh = new CompletableFuture<>();
+        // this.nextResult.set(fresh);
+        CompletableFuture<T> next = getNextResult();
         this.timedTask.start();
-        return getNextResult();
+        return next;
     }
 
     /**
@@ -111,7 +112,7 @@ public class FutureTimedTask<T> {
 
     /**
      * @param delay the initial delay before the first execution; ignored when
-     *              negative
+     *            negative
      * @return false if the task is currently running
      */
     public boolean setInitialDelay(final Duration delay) {

@@ -13,8 +13,7 @@ public class TimedTask {
 
     @SuppressWarnings("javadoc")
     protected enum State {
-                          RUNNING,
-                          NOT_RUNNING;
+        RUNNING, NOT_RUNNING;
     }
 
     /* mandatory fields */
@@ -71,6 +70,8 @@ public class TimedTask {
             setState(State.NOT_RUNNING);
             // notify waiting timer thread
             setNextExecutionTime(null);
+            // interrupt sleeping timer thread
+            this.timer.interruptTimerThread();
         }
     }
 
@@ -165,7 +166,10 @@ public class TimedTask {
      */
     private class Timer {
 
+        private volatile Thread timerThread;
+
         private void runTimer() {
+            this.timerThread = Thread.currentThread();
             if (!isRunning()) {
                 return;
             }
@@ -194,11 +198,11 @@ public class TimedTask {
         }
 
         private boolean isAlive() {
-            return (TimedTask.this.state == State.RUNNING) && !Thread.currentThread().isInterrupted();
+            return isRunning() && !Thread.currentThread().isInterrupted();
         }
 
         private void executeTask() {
-            Runnable runnable = () -> {
+            Runnable task = () -> {
                 try {
                     TimedTask.this.task.accept(TimedTask.this);
                 }
@@ -211,11 +215,11 @@ public class TimedTask {
             };
 
             if ((TimedTask.this.name == null) || TimedTask.this.name.isBlank()) {
-                TimedTask.this.executor.run(runnable);
+                TimedTask.this.executor.run(task);
             }
             else {
-                String runnableName = "[" + TimedTask.this.name + "]Task#" + (++TimedTask.this.count);
-                TimedTask.this.executor.run(runnable, runnableName);
+                String taskName = "[" + TimedTask.this.name + "]Task#" + (++TimedTask.this.count);
+                TimedTask.this.executor.run(task, taskName);
             }
 
         }
@@ -250,19 +254,25 @@ public class TimedTask {
 
         private void waitTillNextExecution() throws InterruptedException {
             if (getNextExecution() == null) {
-                // REPETITIVE DELAY SCENARIO
+                // REPETITIVE DELAY SCENARIO: wait till next execution time is set by the task
+                // thread.
                 synchronized (TimedTask.this.executionLock) {
-                    while (isRunning() && !Thread.currentThread().isInterrupted() && (getNextExecution() == null)) {
+                    while (isAlive() && (getNextExecution() == null)) {
                         TimedTask.this.executionLock.wait();
                     }
                 }
             }
             else {
-                // PERIODIC DELAY SCENARIO
                 Duration duration = Duration.between(LocalDateTime.now(), getNextExecution());
                 Thread.sleep(duration);
                 // timer thread sleeps
                 // task thread terminates once finished
+            }
+        }
+
+        private void interruptTimerThread() {
+            if (this.timerThread != null) {
+                this.timerThread.interrupt();
             }
         }
 

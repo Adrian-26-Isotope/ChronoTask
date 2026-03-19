@@ -1907,6 +1907,37 @@ class TimedTaskTest {
         timer.stop();
     }
 
+    /**
+     * Tests that stop() promptly terminates the timer thread even when it is
+     * sleeping between repetitive executions (i.e. blocked in Thread.sleep()).
+     * Without interrupt(), stop() would have no effect until the 60-second sleep
+     * expired.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testStopInterruptsTimerThreadDuringSleep(final AbstractTimedTaskExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+
+        // instant task, 60-second repetitive delay — after first execution the timer
+        // thread enters Thread.sleep() for 60 seconds
+        TimedTaskBuilder builder = executor.createTimedTask(createTask(0));
+        builder.setRepetetiveDelay(Duration.ofSeconds(60));
+        TimedTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(150); // wait for first execution to complete
+        assertEquals(1, this.counter.get(), "First execution should have completed");
+        // timer thread is now sleeping for 60 seconds
+
+        long stopStart = System.currentTimeMillis();
+        timer.stop();
+        long elapsed = System.currentTimeMillis() - stopStart;
+
+        assertEquals(State.NOT_RUNNING, timer.getState(), "Timer should be stopped");
+        assertTrue(elapsed < 500, "stop() should return promptly (< 500ms), but took " + elapsed + "ms");
+    }
+
     // ========== Helper Methods ==========
 
     private Consumer<TimedTask> createTask(final int seconds) {

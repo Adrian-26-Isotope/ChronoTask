@@ -6,9 +6,8 @@ import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
- * A timer with the ability to run a single task.
- * This task can be schedules periodically,
- * repetetively or once with a initial delay.
+ * A timer with the ability to run a single task. This task can be schedules
+ * periodically, repetitively or once with a initial delay.
  */
 public class TimedTask {
 
@@ -26,7 +25,7 @@ public class TimedTask {
     private String name = "";
     private Duration initialDelay;
     private Duration periodicDelay;
-    private Duration repetetiveDelay;
+    private Duration repetitiveDelay;
 
     /* internal fields */
     private long count = 0;
@@ -64,7 +63,7 @@ public class TimedTask {
     }
 
     /**
-     * stop any reoccuring executions and terminate this timer gracefully. Once
+     * stop any reoccurring executions and terminate this timer gracefully. Once
      * stopped it can be started again.
      */
     public synchronized void stop() {
@@ -74,7 +73,6 @@ public class TimedTask {
             setNextExecutionTime(null);
         }
     }
-
 
     /**
      * @param name optional name for tasks
@@ -139,12 +137,12 @@ public class TimedTask {
     }
 
     /**
-     * @param repeatDelay the repetetive delay to set
+     * @param repeatDelay the repetitive delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setRepetetiveDelay(final Duration repeatDelay) {
+    protected boolean setRepetitiveDelay(final Duration repeatDelay) {
         if (!isRunning()) {
-            this.repetetiveDelay = repeatDelay;
+            this.repetitiveDelay = repeatDelay;
             return true;
         }
         return false;
@@ -181,9 +179,10 @@ public class TimedTask {
 
         private void loopTimer() {
             try {
-                while (isHealty()) {
-                    if (getNextExecution().compareTo(LocalDateTime.now()) <= 0) {
-                        calculatePeriodicExecutionTime();
+                LocalDateTime next;
+                while (isAlive() && (next = getNextExecution()) != null) {
+                    if (next.compareTo(LocalDateTime.now()) <= 0) {
+                        calculatePeriodicExecutionTime(next);
                         executeTask();
                     }
                     waitTillNextExecution();
@@ -194,9 +193,8 @@ public class TimedTask {
             }
         }
 
-        private boolean isHealty() {
-            return (TimedTask.this.state == State.RUNNING) && !Thread.currentThread().isInterrupted() &&
-                    (getNextExecution() != null);
+        private boolean isAlive() {
+            return (TimedTask.this.state == State.RUNNING) && !Thread.currentThread().isInterrupted();
         }
 
         private void executeTask() {
@@ -208,7 +206,7 @@ public class TimedTask {
                     // TODO Handle the exception, log it, etc.
                 }
                 finally {
-                    calculateRepetetiveExecutionTime();
+                    calculateRepetitiveExecutionTime();
                 }
             };
 
@@ -223,26 +221,26 @@ public class TimedTask {
         }
 
         /**
-         * onyl with periodic scenario: calculate the next execution time.
+         * only with periodic scenario: calculate the next execution time.
          */
-        private void calculatePeriodicExecutionTime() {
+        private void calculatePeriodicExecutionTime(final LocalDateTime currentExecutionTime) {
             if (TimedTask.this.periodicDelay != null) {
-                setNextExecutionTime(getNextExecution().plus(TimedTask.this.periodicDelay));
+                setNextExecutionTime(currentExecutionTime.plus(TimedTask.this.periodicDelay));
             }
             else {
                 // set next execution to null temporarily.
-                // once the task finishes it will set the next execution with the repetetive
+                // once the task finishes it will set the next execution with the repetitive
                 // delay.
                 setNextExecutionTime(null);
             }
         }
 
         /**
-         * only for repretetive scenario: set the next execution time.
+         * only for repetitive scenario: set the next execution time.
          */
-        private void calculateRepetetiveExecutionTime() {
-            if (TimedTask.this.repetetiveDelay != null) {
-                setNextExecutionTime(LocalDateTime.now().plus(TimedTask.this.repetetiveDelay));
+        private void calculateRepetitiveExecutionTime() {
+            if (TimedTask.this.repetitiveDelay != null) {
+                setNextExecutionTime(LocalDateTime.now().plus(TimedTask.this.repetitiveDelay));
             }
             else if (TimedTask.this.periodicDelay == null) {
                 // SINGLE TASK EXECUTION SCENARIO
@@ -252,7 +250,7 @@ public class TimedTask {
 
         private void waitTillNextExecution() throws InterruptedException {
             if (getNextExecution() == null) {
-                // REPETETIVE DELAY SCENARIO
+                // REPETITIVE DELAY SCENARIO
                 synchronized (TimedTask.this.executionLock) {
                     while (isRunning() && !Thread.currentThread().isInterrupted() && (getNextExecution() == null)) {
                         TimedTask.this.executionLock.wait();

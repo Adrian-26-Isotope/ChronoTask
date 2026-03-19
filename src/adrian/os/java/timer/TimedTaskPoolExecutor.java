@@ -21,6 +21,7 @@ import adrian.os.java.threadpool.CustomThreadPool;
  */
 public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
 
+    private final String name;
     private final AbstractExecutorService threadPool;
 
 
@@ -32,6 +33,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      * </p>
      */
     public TimedTaskPoolExecutor() {
+        this.name = null;
         this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).build();
     }
 
@@ -45,6 +47,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      * @param name the name of this executor
      */
     public TimedTaskPoolExecutor(final String name) {
+        this.name = name;
         this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name)
                 .build();
     }
@@ -59,22 +62,36 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      * @param threadPool the executor service to use for task execution
      */
     public TimedTaskPoolExecutor(final AbstractExecutorService threadPool) {
+        this.name = null;
         this.threadPool = Objects.requireNonNull(threadPool);
     }
 
     /**
-     * Executes the given runnable using the configured thread pool.
+     * Executes the given runnable using the configured thread pool, temporarily
+     * renaming the pool thread during execution.
      * <p>
-     * Note: The provided name parameter is currently discarded and not used for
-     * thread naming. The task is delegated to {@link #run(Runnable)}.
+     * If this executor has a name, the thread is renamed to
+     * {@code <poolName>/<name>} during execution; otherwise it is renamed to
+     * {@code <name>}. The original thread name is restored after the runnable
+     * completes.
      * </p>
      *
      * @param runnable the task to execute
-     * @param name     the intended name for the task (currently unused)
+     * @param name     the name to assign to the thread during execution
      */
     @Override
     void run(final Runnable runnable, final String name) {
-        run(runnable);
+        this.threadPool.submit(() -> {
+            Thread current = Thread.currentThread();
+            String oldName = current.getName();
+            current.setName((this.name != null) ? this.name + "/" + name : name);
+            try {
+                runnable.run();
+            }
+            finally {
+                current.setName(oldName);
+            }
+        });
     }
 
     /**

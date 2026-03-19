@@ -623,19 +623,13 @@ class TimedTaskTest {
     }
 
     /**
-     * Tests creating a pool executor with a named thread pool and verifies thread
-     * naming.
-     * The TimedTaskPoolExecutor uses the CustomThreadPool's thread factory for
-     * naming,
-     * so the pool name is used for thread naming, not the task name.
+     * Tests that a named task running in a named pool executor has a thread name
+     * combining both pool and task name in the format
+     * {@code <poolName>/<taskName>}.
      */
     @Test
-    void testNamedTaskWithPoolExecutor() throws InterruptedException {
-        // Create a pool with a specific name
-        CustomThreadPool pool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2))
-                .setName("TestPool").build();
-
-        this.currentExecutor = new TimedTaskPoolExecutor(pool);
+    void testNamedTaskWithPoolExecutorThreadNames() throws InterruptedException {
+        TimedTaskPoolExecutor poolExecutor = new TimedTaskPoolExecutor("TestPool");
 
         // Create a task that captures the thread name
         final String[] capturedThreadName = { null };
@@ -644,26 +638,19 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
         };
 
-        // Note: The task name is ignored by TimedTaskPoolExecutor
-        TimedTaskBuilder builder = this.currentExecutor.createTimedTask(namedTask);
-        builder.setName("IgnoredTaskName");
-        TimedTask timer = builder.build();
+        TimedTask timer = poolExecutor.createTimedTask(namedTask)
+                .setName("DatabaseSync")
+                .build();
 
         timer.start();
         Thread.sleep(150); // Allow task to execute
         assertEquals(1, this.counter.get(), "Task should have executed");
 
-        // Verify the thread name contains the pool name (not the task name)
-        assertFalse((capturedThreadName[0] == null) || capturedThreadName[0].isEmpty(),
-                "Thread name should be captured");
-        assertTrue(capturedThreadName[0].contains("TestPool"),
-                "Thread name should contain pool name, but was: " + capturedThreadName[0]);
-        assertTrue(capturedThreadName[0].contains("#"),
-                "Thread name should contain thread counter delimiter, but was: " + capturedThreadName[0]);
-        assertFalse(capturedThreadName[0].contains("IgnoredTaskName"),
-                "Thread name should NOT contain the task name, but was: " + capturedThreadName[0]);
+        assertEquals("TestPool/[DatabaseSync]Task#1", capturedThreadName[0],
+                "Thread name should be TestPool/[DatabaseSync]Task#1, but was: " + capturedThreadName[0]);
 
         timer.stop();
+        poolExecutor.shutdownNow();
     }
 
     /**

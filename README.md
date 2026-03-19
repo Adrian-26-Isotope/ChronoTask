@@ -2006,7 +2006,6 @@ TimedTask task = executor.createTimedTask(t -> {
 
 ## Open Topics
 
-- TimedTaskBuilder & ThreadPoolFactory both use a name, but behave differently. Find a uniform approach.
 - Callable & Future support
 - proper exception handling & reporting
 

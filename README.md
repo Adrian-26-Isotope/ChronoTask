@@ -13,6 +13,7 @@ A lightweight, flexible timer task scheduler for Java with fine-grained control 
   - [Execution Modes](#execution-modes)
   - [Executor Types](#executor-types)
   - [Controlling Task Lifecycle](#controlling-task-lifecycle)
+  - [Future-Based Tasks (FutureTimedTask)](#future-based-tasks-futuretimedtask)
 - [Advanced Usage](#advanced-usage)
   - [Custom Thread Factories](#custom-thread-factories)
   - [Working with Thread Pools](#working-with-thread-pools)
@@ -44,6 +45,10 @@ The library supports three execution modes: one-time with optional initial delay
 - **Custom Thread Factory Support**: Configure custom `ThreadFactory` implementations to control thread creation behavior, naming conventions, and thread properties.
 
 - **Built-in Thread Pool Integration**: `TimedTaskPoolExecutor` integrates with `CustomThreadPool` for efficient resource management with configurable behavior.
+
+- **Future-Based Results**: `FutureTimedTask<T>` wraps a `TimedTask` and exposes each execution result via `CompletableFuture<T>`, enabling reactive result handling, chaining, and `getLastResult()` for the most recent value.
+
+- **Exception Propagation**: Uncaught exceptions thrown inside a task are forwarded to the thread's `UncaughtExceptionHandler` rather than being silently swallowed.
 
 - **Task State Introspection**: Query task state with `isRunning()` to monitor execution status and coordinate between multiple tasks.
 
@@ -94,7 +99,7 @@ future = executor.scheduleAtFixedRate(task, 0, 1, TimeUnit.SECONDS);
 
 ```java
 // TimedTask example
-TimedTask task = executor.createTimedTask(t -> doWork())
+TimedTask task = executor.createTask(t -> doWork())
     .setPeriodicDelay(Duration.ofSeconds(1))
     .build();
 
@@ -120,19 +125,19 @@ task.start();  // Restart - same configuration
 
 ```java
 // Periodic: Fixed-rate execution
-TimedTask periodic = executor.createTimedTask(t -> doWork())
+TimedTask periodic = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
     .setPeriodicDelay(Duration.ofSeconds(10))
     .build();
 
 // Repetitive: Fixed-delay execution
-TimedTask repetitive = executor.createTimedTask(t -> doWork())
+TimedTask repetitive = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
     .setRepetitiveDelay(Duration.ofSeconds(10))
     .build();
 
 // One-time: Single execution after delay
-TimedTask oneTime = executor.createTimedTask(t -> doWork())
+TimedTask oneTime = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
     .build();
 ```
@@ -156,14 +161,14 @@ TimedTask oneTime = executor.createTimedTask(t -> doWork())
 ```java
 // Option 1: Individual threads per task (virtual threads by default)
 TimedTaskThreadExecutor threadExec = new TimedTaskThreadExecutor();
-TimedTask task1 = threadExec.createTimedTask(t -> doWork())
+TimedTask task1 = threadExec.createTask(t -> doWork())
     .setName("DatabaseSync")
     .setPeriodicDelay(Duration.ofMinutes(5))
     .build();
 
 // Option 2: Shared thread pool
 TimedTaskPoolExecutor poolExec = new TimedTaskPoolExecutor("MyTaskPool");
-TimedTask task2 = poolExec.createTimedTask(t -> doWork())
+TimedTask task2 = poolExec.createTask(t -> doWork())
     .setName("CacheCleanup")
     .setPeriodicDelay(Duration.ofMinutes(10))
     .build();
@@ -194,7 +199,7 @@ AbstractTimedTaskExecutor customExec = new MyCustomExecutor();
 // Use WeakReference for long-lived external objects
 WeakReference<MyService> serviceRef = new WeakReference<>(myService);
 // TimedTask resource management
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     MyService service = serviceRef.get();
     if (service != null) {
         service.doWork();
@@ -225,7 +230,7 @@ poolExecutor.shutdown();
 
 ```java
 // TimedTask - rich introspection and self-control
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     // Task can introspect its own state
     if (t.isRunning()) {
         System.out.println("Task is actively scheduled");
@@ -284,6 +289,7 @@ if (!task.isRunning()) {
 | **Thread Management** | Shared pool for all tasks | Flexible depending on execution strategy |
 | **Timing Modes** | Method-based (`scheduleAtFixedRate` vs `scheduleWithFixedDelay`) | Configuration-based (`setPeriodicDelay` vs `setRepetitiveDelay`) |
 | **State Inspection** | `isDone()`, `isCancelled()` | `isRunning()` |
+| **Future / Result API** | `ScheduledFuture` (control only) | `FutureTimedTask<T>` — `CompletableFuture<T>` per execution |
 | **Task Self-Reference** | No | Yes |
 | **Resource Cleanup** | Service-level shutdown | Task-level + optional thread pool shutdown |
 | **Memory Management** | Manual management required | Defensive copies, weak reference encouragement |
@@ -303,6 +309,7 @@ if (!task.isRunning()) {
 - You want tasks to introspect or control themselves
 - You need flexibility in choosing between dedicated threads or thread pools
 - You want better debugging support with named tasks and threads
+- You need per-execution results via `CompletableFuture<T>` (use `FutureTimedTask<T>`)
 
 ## Architecture
 
@@ -355,7 +362,9 @@ The `TimedTaskBuilder` class implements the Builder pattern for fluent, type-saf
 
 The `AbstractTimedTaskExecutor` is an abstract base class that defines the execution strategy pattern.
 
-- **Factory for Builders**: Provides `createTimedTask(Consumer<TimedTask>)` to create `TimedTaskBuilder` instances
+- **Factory for Builders**: Provides two overloaded `createTask()` factory methods:
+  - `createTask(Consumer<TimedTask>)` → returns a `TimedTaskBuilder`
+  - `createTask(Function<FutureTimedTask<T>, T>)` → returns a `FutureTimedTaskBuilder<T>`
 - **Execution Abstraction**: Declares two abstract methods for execution:
   - `run(Runnable task)`: Execute task without naming
   - `run(Runnable task, String name)`: Execute task with thread naming support
@@ -397,8 +406,32 @@ The `AbstractTimedTaskExecutor` is an abstract base class that defines the execu
 - Default configuration (0 minimum threads) allows pool to scale down when idle
 - Integration with `CustomThreadPool` provides advanced features like dynamic sizing
 - Accepting `AbstractExecutorService` allows integration with any Java executor
-- Currently doesn't propagate task names to thread pool (noted as limitation)
+- Task names are propagated to pool execution threads
 - Suitable for many tasks sharing limited thread resources
+
+#### 6. FutureTimedTask\<T\>
+
+`FutureTimedTask<T>` wraps a `TimedTask` and exposes each execution result as a `CompletableFuture<T>`.
+
+- **Result per Execution**: Each execution atomically captures the pending future, runs the task, and completes that future with the result or exception. A fresh future is installed before the next execution.
+- **Start Returns Future**: `start()` returns the `CompletableFuture<T>` for the first upcoming execution.
+- **Next Result Access**: `getNextResult()` returns the future for the upcoming execution at any point.
+- **Last Result Access**: `getLastResult()` returns an `Optional<T>` of the most recent successful result.
+- **Full Lifecycle**: `start()`, `stop()`, `isRunning()` delegate to the underlying `TimedTask`.
+- **Exception Propagation**: If the task throws, the future is completed exceptionally; the `lastResult` is not updated.
+
+**Key Design Decisions**:
+- `AtomicReference<CompletableFuture<T>>` ensures thread-safe future swapping with no races
+- `start()` is `synchronized` and installs a fresh future before starting the underlying task
+- Instances are created via `executor.createTask(Function<FutureTimedTask<T>, T>)` and `FutureTimedTaskBuilder<T>.build()`
+
+#### 7. FutureTimedTaskBuilder\<T\>
+
+The `FutureTimedTaskBuilder<T>` class mirrors `TimedTaskBuilder` for `FutureTimedTask<T>`.
+
+- **Same fluent API**: `setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`
+- **Builds `FutureTimedTask<T>`**: Constructs fully configured instances via `build()`
+- **Protected constructor**: Instantiated exclusively through `AbstractTimedTaskExecutor.createTask(Function)`
 
 ### Component Interaction
 
@@ -427,7 +460,7 @@ The following diagram illustrates how components interact during typical task li
     │ • Custom ThreadFactory│       │ • CustomThreadPool    │
     └───────────┬───────────┘       └───────────┬───────────┘
                 │                               │
-                │ 2. createTimedTask(task)      │
+                │ 2. createTask(task)           │
                 └───────────────┬───────────────┘
                                 │
                                 ▼
@@ -502,7 +535,7 @@ The following diagram illustrates how components interact during typical task li
 - Optionally configures executor (e.g., custom `ThreadFactory` or thread pool settings)
 
 **2. Task Creation**
-- User calls `executor.createTimedTask(task)` passing a `Consumer<TimedTask>`
+- User calls `executor.createTask(task)` passing a `Consumer<TimedTask>`
 - Executor returns a `TimedTaskBuilder` pre-configured with the executor reference
 
 **3. Task Configuration**
@@ -614,7 +647,7 @@ TimedTask uses a fluent builder pattern for task creation. The process involves 
 TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
 
 // Create and configure a task
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     System.out.println("Task executed!");
 })
 .setName("MyTask")
@@ -638,7 +671,7 @@ executor.setThreadFactory(r -> {
 });
 
 // Create task
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     // High-priority daemon thread execution
     performCriticalWork();
 })
@@ -663,14 +696,14 @@ TimedTask task = executor.createTimedTask(t -> {
 TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor("MyTaskPool");
 
 // Create multiple tasks sharing the pool
-TimedTask task1 = executor.createTimedTask(t -> {
+TimedTask task1 = executor.createTask(t -> {
     processData();
 })
 .setName("DataProcessor")
 .setPeriodicDelay(Duration.ofMinutes(1))
 .build();
 
-TimedTask task2 = executor.createTimedTask(t -> {
+TimedTask task2 = executor.createTask(t -> {
     cleanupCache();
 })
 .setName("CacheCleanup")
@@ -702,7 +735,7 @@ CustomThreadPool customPool = CustomThreadPool.builder()
 TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor(customPool);
 
 // Use the executor
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     performWork();
 })
 .build();
@@ -715,7 +748,6 @@ TimedTask task = executor.createTimedTask(t -> {
 - Memory efficiency is a priority
 
 **Important Notes:**
-- Currently, task names are not propagated to pool threads (limitation noted)
 - Remember to call `shutdown()` on the pool executor when done
 - The pool scales down automatically when threads are idle
 
@@ -735,7 +767,7 @@ A one-time task executes exactly once after an optional initial delay, then auto
 
 ```java
 // Execute once immediately
-TimedTask immediate = executor.createTimedTask(t -> {
+TimedTask immediate = executor.createTask(t -> {
     System.out.println("Executed immediately");
 })
 .build();
@@ -744,7 +776,7 @@ immediate.start();
 // Executes once, then task automatically stops
 
 // Execute once after 5 seconds
-TimedTask delayed = executor.createTimedTask(t -> {
+TimedTask delayed = executor.createTask(t -> {
     System.out.println("Executed after 5 seconds");
 })
 .setInitialDelay(Duration.ofSeconds(5))
@@ -771,7 +803,7 @@ Periodic execution schedules tasks at **fixed intervals from the start time**, s
 
 ```java
 // Execute every 10 seconds, starting immediately
-TimedTask periodic = executor.createTimedTask(t -> {
+TimedTask periodic = executor.createTask(t -> {
     performPeriodicCheck();
 })
 .setPeriodicDelay(Duration.ofSeconds(10))
@@ -780,7 +812,7 @@ TimedTask periodic = executor.createTimedTask(t -> {
 periodic.start();
 
 // Execute every 1 minute with 30-second initial delay
-TimedTask delayedPeriodic = executor.createTimedTask(t -> {
+TimedTask delayedPeriodic = executor.createTask(t -> {
     syncData();
 })
 .setInitialDelay(Duration.ofSeconds(30))
@@ -834,7 +866,7 @@ Repetitive execution schedules the next execution **after the previous execution
 
 ```java
 // Execute with 5-second delay after each completion
-TimedTask repetitive = executor.createTimedTask(t -> {
+TimedTask repetitive = executor.createTask(t -> {
     processQueue(); // May take variable time
 })
 .setRepetitiveDelay(Duration.ofSeconds(5))
@@ -843,7 +875,7 @@ TimedTask repetitive = executor.createTimedTask(t -> {
 repetitive.start();
 
 // Execute with 10-second initial delay, then 30-second delays between completions
-TimedTask delayedRepetitive = executor.createTimedTask(t -> {
+TimedTask delayedRepetitive = executor.createTask(t -> {
     performMaintenance();
 })
 .setInitialDelay(Duration.ofSeconds(10))
@@ -1004,8 +1036,8 @@ TimedTaskPoolExecutor javaPoolExecutor = new TimedTaskPoolExecutor(javaExecutor)
 TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor("MyPool");
 
 // Create and start multiple tasks
-TimedTask task1 = executor.createTimedTask(t -> work1()).build();
-TimedTask task2 = executor.createTimedTask(t -> work2()).build();
+TimedTask task1 = executor.createTask(t -> work1()).build();
+TimedTask task2 = executor.createTask(t -> work2()).build();
 task1.start();
 task2.start();
 
@@ -1025,7 +1057,6 @@ executor.shutdown();  // Initiates graceful shutdown
 - Better for systems with thread count limits
 
 **Considerations:**
-- Task names currently not propagated to pool threads (known limitation)
 - Shared pool means tasks can affect each other's performance ⚠️
 - Must remember to shutdown pool when done
 
@@ -1044,7 +1075,7 @@ executor.shutdown();  // Initiates graceful shutdown
 | **Default Thread Type** | Virtual threads | Depends on pool configuration |
 | **Resource Efficiency** | Lower (more threads) | Higher (shared resources) |
 | **Task Isolation** | Complete | Partial (shared pool) |
-| **Thread Naming** | Automatic | Manual via ThreadFactory |
+| **Thread Naming** | Automatic | Automatic (propagated from task name) |
 | **Cleanup** | Automatic on task stop | Requires pool shutdown |
 | **Scalability** | Excellent (virtual threads) | Good (bounded by pool) |
 | **Configuration** | ThreadFactory | Pool parameters (including ThreadFactory) |
@@ -1077,7 +1108,7 @@ public class MyCustomExecutor extends AbstractTimedTaskExecutor {
 
 // Use your custom executor
 MyCustomExecutor executor = new MyCustomExecutor();
-TimedTask task = executor.createTimedTask(t -> doWork()).build();
+TimedTask task = executor.createTask(t -> doWork()).build();
 ```
 
 ### Controlling Task Lifecycle
@@ -1098,7 +1129,7 @@ Use the `start()` method to begin task execution. This transitions the task from
 **Example with Initial Delay:**
 
 ```java
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     System.out.println("Executed at: " + LocalDateTime.now());
 })
 .setInitialDelay(Duration.ofSeconds(5))
@@ -1125,7 +1156,8 @@ Use the `stop()` method to halt task execution. This transitions the task to `NO
 
 **Stop Behavior:**
 
-- **Graceful shutdown**: Timer thread terminates cleanly
+- **Immediate interrupt**: `stop()` interrupts the timer thread immediately, so a sleeping timer wakes up and exits without waiting for the full sleep duration
+- **Graceful shutdown**: Timer thread terminates cleanly after the interrupt
 - **No return value**: `stop()` is a `void` method (always succeeds)
 - **Idempotent**: Calling `stop()` on a stopped task is safe (no effect)
 - **Current execution**: Any currently executing task instance completes normally
@@ -1134,7 +1166,7 @@ Use the `stop()` method to halt task execution. This transitions the task to `NO
 **Timing of Stop:**
 
 ```java
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     System.out.println("Start execution: " + LocalDateTime.now());
     Thread.sleep(3000);  // Simulates long-running work
     System.out.println("End execution: " + LocalDateTime.now());
@@ -1182,13 +1214,13 @@ Use the `isRunning()` method to check if a task is actively running.
 **Coordination Between Tasks:**
 
 ```java
-TimedTask primaryTask = executor.createTimedTask(t -> {
+TimedTask primaryTask = executor.createTask(t -> {
     System.out.println("Primary task running");
 })
 .setPeriodicDelay(Duration.ofSeconds(5))
 .build();
 
-TimedTask secondaryTask = executor.createTimedTask(t -> {
+TimedTask secondaryTask = executor.createTask(t -> {
     // Secondary task only runs when primary is active
     if (primaryTask.isRunning()) {
         System.out.println("Secondary task running");
@@ -1216,7 +1248,7 @@ Tasks receive a reference to themselves (`Consumer<TimedTask>`), enabling self-i
 ```java
 AtomicInteger counter = new AtomicInteger(0);
 
-TimedTask selfStoppingTask = executor.createTimedTask(t -> {
+TimedTask selfStoppingTask = executor.createTask(t -> {
     int count = counter.incrementAndGet();
     System.out.println("Execution #" + count);
 
@@ -1236,7 +1268,7 @@ selfStoppingTask.start();
 **Task Stops on Error Condition:**
 
 ```java
-TimedTask monitoringTask = executor.createTimedTask(t -> {
+TimedTask monitoringTask = executor.createTask(t -> {
     if (!checkSystemHealth()) {
         System.err.println("System unhealthy, stopping monitoring");
         t.stop();  // Stop self on error
@@ -1287,6 +1319,66 @@ Note: start() on RUNNING task returns false (no state change)
 5. **Restart**: Can repeat start-stop cycle indefinitely
 6. **Self-stop**: Task can stop itself from within execution
 7. **One-time**: Automatically stops after single execution (if no periodic/repetitive delay)
+
+### Future-Based Tasks (FutureTimedTask)
+
+`FutureTimedTask<T>` is created via the `createTask(Function<FutureTimedTask<T>, T>)` overload on any executor. Use it when you need to receive the result of each execution as a `CompletableFuture<T>`.
+
+#### One-Shot with Result
+
+```java
+TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
+
+FutureTimedTask<String> task = executor.createTask(futureTask -> {
+    return fetchDataFromRemote();
+})
+.setName("RemoteFetch")
+.setInitialDelay(Duration.ofSeconds(1))
+.build();
+
+CompletableFuture<String> firstResult = task.start();
+String data = firstResult.get(5, TimeUnit.SECONDS);
+System.out.println("Got: " + data);
+```
+
+#### Recurring with Result Chaining
+
+```java
+FutureTimedTask<Integer> task = executor.createTask(t -> {
+    return computeMetric();
+})
+.setName("MetricCollector")
+.setPeriodicDelay(Duration.ofSeconds(10))
+.build();
+
+CompletableFuture<Integer> next = task.start();
+
+// Chain across multiple executions
+next.thenAccept(value -> {
+    System.out.println("First: " + value);
+    // Get the future for the next execution
+    task.getNextResult().thenAccept(v2 -> System.out.println("Second: " + v2));
+});
+```
+
+#### Reading the Last Successful Result
+
+```java
+// After at least one execution, getLastResult() returns the most recent value
+task.getLastResult().ifPresent(v -> System.out.println("Last: " + v));
+```
+
+#### Exception Handling
+
+If the task throws, the future completes exceptionally — `getLastResult()` is not updated.
+
+```java
+CompletableFuture<String> result = task.start();
+result.exceptionally(ex -> {
+    System.err.println("Task failed: " + ex.getMessage());
+    return null;
+});
+```
 
 ## Advanced Usage
 
@@ -1407,8 +1499,8 @@ TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor("MyPool");
 
 try {
     // Create and run tasks
-    TimedTask task1 = executor.createTimedTask(t -> work1()).build();
-    TimedTask task2 = executor.createTimedTask(t -> work2()).build();
+    TimedTask task1 = executor.createTask(t -> work1()).build();
+    TimedTask task2 = executor.createTask(t -> work2()).build();
 
     task1.start();
     task2.start();
@@ -1438,8 +1530,8 @@ TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor("MyPool");
 
 try {
     // Create and run tasks
-    TimedTask task1 = executor.createTimedTask(t -> work1()).build();
-    TimedTask task2 = executor.createTimedTask(t -> work2()).build();
+    TimedTask task1 = executor.createTask(t -> work1()).build();
+    TimedTask task2 = executor.createTask(t -> work2()).build();
 
     task1.start();
     task2.start();
@@ -1477,7 +1569,7 @@ public class ServiceManager {
     private LargeDataService dataService = new LargeDataService(); // Large object
 
     public void startMonitoring() {
-        TimedTask monitor = executor.createTimedTask(t -> {
+        TimedTask monitor = executor.createTask(t -> {
             // This closure captures 'this', which includes dataService
             dataService.checkHealth();
         })
@@ -1513,7 +1605,7 @@ public class ServiceManager {
         // Create weak reference to allow GC
         WeakReference<LargeDataService> serviceRef = new WeakReference<>(dataService);
 
-        TimedTask monitor = executor.createTimedTask(t -> {
+        TimedTask monitor = executor.createTask(t -> {
             LargeDataService service = serviceRef.get();
             if (service != null) {
                 service.checkHealth();
@@ -1551,7 +1643,7 @@ public class ServiceManager {
         // Pass only what's needed, not the entire 'this'
         String serviceId = dataService.getId();
 
-        TimedTask monitor = executor.createTimedTask(t -> {
+        TimedTask monitor = executor.createTask(t -> {
             // This doesn't capture ServiceManager instance
             MonitoringUtils.checkHealth(serviceId);
         })
@@ -1576,13 +1668,13 @@ class MonitoringUtils {
 
 ```java
 // BAD: Captures entire object
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     this.processAllData();  // Captures 'this'
 }).build();
 
 // GOOD: Capture only what's needed
 String data = this.data;
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     process(data);  // Captures only 'data' string
 }).build();
 ```
@@ -1593,7 +1685,7 @@ TimedTask task = executor.createTimedTask(t -> {
 WeakReference<HeavyResource> resourceRef = new WeakReference<>(heavyResource);
 AtomicBoolean cleanedUp = new AtomicBoolean(false);
 
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     HeavyResource resource = resourceRef.get();
 
     if (resource == null && !cleanedUp.getAndSet(true)) {
@@ -1627,7 +1719,7 @@ public class DataService {
         // Create weak reference to allow GC
         WeakReference<DataService> serviceRef = new WeakReference<>(this);
 
-        TimedTask task = executor.createTimedTask(t -> {
+        TimedTask task = executor.createTask(t -> {
             DataService service = serviceRef.get();
             if (service != null) {
                 service.checkStatus();
@@ -1656,7 +1748,7 @@ public class DataService {
         // Extract only the ID, not the entire object
         String id = this.serviceId;
 
-        TimedTask task = executor.createTimedTask(t -> {
+        TimedTask task = executor.createTask(t -> {
             // Only 'id' is captured, not 'this'
             checkStatusById(id);
         }).setPeriodicDelay(Duration.ofMinutes(1)).build();
@@ -1698,7 +1790,7 @@ public class DataProcessor {
     private TimedTask processingTask;
 
     public void start() {
-        processingTask = executor.createTimedTask(t -> processData())
+        processingTask = executor.createTask(t -> processData())
             .setPeriodicDelay(Duration.ofMinutes(5))
             .build();
 
@@ -1718,7 +1810,7 @@ public class DataProcessor {
 ```java
 // ✅ GOOD: Ensure cleanup with try-finally
 public void runProcessing() {
-    TimedTask task = executor.createTimedTask(t -> process()).build();
+    TimedTask task = executor.createTask(t -> process()).build();
 
     try {
         task.start();
@@ -1762,7 +1854,7 @@ public void runProcessing() {
 
 ```java
 // ✅ GOOD: Periodic for fast, predictable tasks
-TimedTask healthCheck = executor.createTimedTask(t -> {
+TimedTask healthCheck = executor.createTask(t -> {
     // Fast check: 10-50ms
     boolean healthy = checkServiceHealth();
     logHealth(healthy);
@@ -1785,7 +1877,7 @@ TimedTask healthCheck = executor.createTimedTask(t -> {
 
 ```java
 // ✅ GOOD: Repetitive for variable-duration tasks
-TimedTask batchProcessor = executor.createTimedTask(t -> {
+TimedTask batchProcessor = executor.createTask(t -> {
     // Variable duration: 100ms to 10 seconds
     processBatchFromQueue();  // Duration depends on batch size
 })
@@ -1806,7 +1898,7 @@ TimedTask batchProcessor = executor.createTimedTask(t -> {
 
 ```java
 // PERIODIC: May overlap if processing is slow
-TimedTask periodicTask = executor.createTimedTask(t -> {
+TimedTask periodicTask = executor.createTask(t -> {
     Thread.sleep(7000);  // Task takes 7 seconds
 })
 .setPeriodicDelay(Duration.ofSeconds(5))  // But period is 5 seconds
@@ -1820,7 +1912,7 @@ TimedTask periodicTask = executor.createTimedTask(t -> {
 // (overlapping executions)
 
 // REPETITIVE: Never overlaps
-TimedTask repetitiveTask = executor.createTimedTask(t -> {
+TimedTask repetitiveTask = executor.createTask(t -> {
     Thread.sleep(7000);  // Task takes 7 seconds
 })
 .setRepetitiveDelay(Duration.ofSeconds(5))  // 5 seconds after completion
@@ -1880,12 +1972,12 @@ Is task duration predictable and fast?
 // ✅ GOOD: Thread executor for isolated, long-running tasks
 TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
 
-TimedTask task1 = executor.createTimedTask(t -> {
+TimedTask task1 = executor.createTask(t -> {
     // This task needs isolation
     performCriticalOperation();
 }).setName("CriticalTask").build();
 
-TimedTask task2 = executor.createTimedTask(t -> {
+TimedTask task2 = executor.createTask(t -> {
     // This task has different thread requirements
     performBackgroundWork();
 }).setName("BackgroundTask").build();
@@ -1913,7 +2005,7 @@ TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor(pool);
 
 // Create many tasks sharing the pool
 for (int i = 0; i < 100; i++) {
-    TimedTask task = executor.createTimedTask(t -> {
+    TimedTask task = executor.createTask(t -> {
         processItem(i);
     }).build();
     task.start();
@@ -1995,7 +2087,7 @@ CustomThreadPool ioPool = CustomThreadPool.builder()
 
 ```java
 // ✅ GOOD: Named task
-TimedTask task = executor.createTimedTask(t -> {
+TimedTask task = executor.createTask(t -> {
     processData();
 })
 .setName("DataProcessor")
@@ -2006,8 +2098,7 @@ TimedTask task = executor.createTimedTask(t -> {
 
 ## Open Topics
 
-- Callable & Future support
-- proper exception handling & reporting
+- Improve exception handling & reporting
 
 ## Requirements
 

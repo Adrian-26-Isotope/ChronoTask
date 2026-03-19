@@ -113,7 +113,7 @@ task.start();  // Restart - same configuration
 
 **TimedTask**:
 - **Periodic mode** (via `setPeriodicDelay()`): Similar to `scheduleAtFixedRate()` - schedules next execution at fixed intervals from the start time, **regardless of task execution duration**
-- **Repetitive mode** (via `setRepetetiveDelay()`): Similar to `scheduleWithFixedDelay()` - waits for task completion before scheduling next execution with the specified delay
+- **Repetitive mode** (via `setRepetitiveDelay()`): Similar to `scheduleWithFixedDelay()` - waits for task completion before scheduling next execution with the specified delay
 - **One-time mode**: When neither periodic nor repetitive delay is set, task executes once after initial delay
 - All modes support optional `setInitialDelay()` for consistent delayed start behavior
 - Mode is configuration-based rather than method-based
@@ -128,7 +128,7 @@ TimedTask periodic = executor.createTimedTask(t -> doWork())
 // Repetitive: Fixed-delay execution
 TimedTask repetitive = executor.createTimedTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
-    .setRepetetiveDelay(Duration.ofSeconds(10))
+    .setRepetitiveDelay(Duration.ofSeconds(10))
     .build();
 
 // One-time: Single execution after delay
@@ -282,7 +282,7 @@ if (!task.isRunning()) {
 | **Restart** | Must resubmit task | Built-in `stop()` and `start()` again |
 | **Execution Strategy** | Fixed thread pool | Pluggable executors |
 | **Thread Management** | Shared pool for all tasks | Flexible depending on execution strategy |
-| **Timing Modes** | Method-based (`scheduleAtFixedRate` vs `scheduleWithFixedDelay`) | Configuration-based (`setPeriodicDelay` vs `setRepetetiveDelay`) |
+| **Timing Modes** | Method-based (`scheduleAtFixedRate` vs `scheduleWithFixedDelay`) | Configuration-based (`setPeriodicDelay` vs `setRepetitiveDelay`) |
 | **State Inspection** | `isDone()`, `isCancelled()` | `isRunning()` |
 | **Task Self-Reference** | No | Yes |
 | **Resource Cleanup** | Service-level shutdown | Task-level + optional thread pool shutdown |
@@ -323,7 +323,7 @@ The `TimedTask` class is the central component representing an individual schedu
 - **Timing Configuration**: Holds three optional `Duration` fields:
   - `initialDelay`: Delay before the first execution
   - `periodicDelay`: Fixed-rate interval between execution starts (scheduled at fixed intervals)
-  - `repetetiveDelay`: Fixed-delay interval after execution completion
+  - `repetitiveDelay`: Fixed-delay interval after execution completion
 
 - **Internal Timer**: Contains a nested `Timer` class that manages the scheduling logic on a dedicated timer thread.
 
@@ -340,7 +340,7 @@ The `TimedTask` class is the central component representing an individual schedu
 The `TimedTaskBuilder` class implements the Builder pattern for fluent, type-safe task configuration. It:
 
 - **Enforces Required Parameters**: Mandates `Consumer<TimedTask>` task and `AbstractTimedTaskExecutor` at construction
-- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setPeriodicDelay()`, `setRepetetiveDelay()`, `setName()`)
+- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`)
 - **Validates Configuration**: Ensures mutually exclusive execution modes (periodic vs. repetitive)
 - **Prevents Memory Leaks**: Creates defensive copies of all `Duration` and `String` parameters to decouple from external references
 - **Builds Immutable Tasks**: Constructs fully configured `TimedTask` instances via `build()`
@@ -438,7 +438,7 @@ The following diagram illustrates how components interact during typical task li
                       │  • setName()           │
                       │  • setInitialDelay()   │
                       │  • setPeriodicDelay()  │
-                      │  • setRepetetiveDelay()│
+                      │  • setRepetitiveDelay()│
                       └──────────┬─────────────┘
                                  │
                                  │ 4. build()
@@ -729,7 +729,7 @@ A one-time task executes exactly once after an optional initial delay, then auto
 
 **Configuration:**
 - Set only `setInitialDelay()` (or set neither delay)
-- Do not set `setPeriodicDelay()` or `setRepetetiveDelay()`
+- Do not set `setPeriodicDelay()` or `setRepetitiveDelay()`
 
 **Example:**
 
@@ -827,7 +827,7 @@ Execute: X===  |     |     |
 Repetitive execution schedules the next execution **after the previous execution completes**, similar to `ScheduledExecutorService.scheduleWithFixedDelay()`. This guarantees a specific delay between task completions and starts.
 
 **Configuration:**
-- Call `setRepetetiveDelay(Duration)` on the builder
+- Call `setRepetitiveDelay(Duration)` on the builder
 - Optionally add `setInitialDelay()` for delayed start
 
 **Example:**
@@ -837,7 +837,7 @@ Repetitive execution schedules the next execution **after the previous execution
 TimedTask repetitive = executor.createTimedTask(t -> {
     processQueue(); // May take variable time
 })
-.setRepetetiveDelay(Duration.ofSeconds(5))
+.setRepetitiveDelay(Duration.ofSeconds(5))
 .build();
 
 repetitive.start();
@@ -847,7 +847,7 @@ TimedTask delayedRepetitive = executor.createTimedTask(t -> {
     performMaintenance();
 })
 .setInitialDelay(Duration.ofSeconds(10))
-.setRepetetiveDelay(Duration.ofSeconds(30))
+.setRepetitiveDelay(Duration.ofSeconds(30))
 .build();
 
 delayedRepetitive.start();
@@ -1737,7 +1737,7 @@ public void runProcessing() {
 - [ ] Pool executors are shutdown when application terminates
 - [ ] Use try-finally for guaranteed cleanup
 - [ ] Implement graceful shutdown with timeouts
-- [ ] Consider shutdown hooks for non deamon threads
+- [ ] Consider shutdown hooks for non-daemon threads
 - [ ] Test shutdown scenarios (normal exit, interruption, errors)
 
 ### 3. Choosing Between Periodic and Repetitive
@@ -1789,7 +1789,7 @@ TimedTask batchProcessor = executor.createTimedTask(t -> {
     // Variable duration: 100ms to 10 seconds
     processBatchFromQueue();  // Duration depends on batch size
 })
-.setRepetetiveDelay(Duration.ofSeconds(5))
+.setRepetitiveDelay(Duration.ofSeconds(5))
 .build();
 
 // Result: 5-second rest between batches, no overlaps
@@ -1823,7 +1823,7 @@ TimedTask periodicTask = executor.createTimedTask(t -> {
 TimedTask repetitiveTask = executor.createTimedTask(t -> {
     Thread.sleep(7000);  // Task takes 7 seconds
 })
-.setRepetetiveDelay(Duration.ofSeconds(5))  // 5 seconds after completion
+.setRepetitiveDelay(Duration.ofSeconds(5))  // 5 seconds after completion
 .build();
 // Result: Tasks never overlap
 // Time:  0s   7s   12s  19s  24s
@@ -2006,13 +2006,13 @@ TimedTask task = executor.createTimedTask(t -> {
 
 ## Open Topics
 
-- TimerTaskBuider & ThreadPoolFactory both use a name, but behave differently. Find a uniform approach.
+- TimedTaskBuilder & ThreadPoolFactory both use a name, but behave differently. Find a uniform approach.
 - Callable & Future support
 - proper exception handling & reporting
 
 ## Requirements
 
-- Java 24+
+- Java 25+
 - JUnit 5
 
 ## License

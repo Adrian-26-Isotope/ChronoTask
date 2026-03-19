@@ -39,7 +39,7 @@ public class TimedTask {
      */
     protected TimedTask(final Consumer<TimedTask> task, final AbstractTimedTaskExecutor exec) {
         this.task = Objects.requireNonNull(task);
-        this.executor = exec;
+        this.executor = Objects.requireNonNull(exec);
     }
 
     /**
@@ -206,8 +206,9 @@ public class TimedTask {
                 try {
                     TimedTask.this.task.accept(TimedTask.this);
                 }
-                catch (final Exception _) {
-                    // TODO Handle the exception, log it, etc.
+                catch (final Exception e) {
+                    Thread current = Thread.currentThread();
+                    current.getUncaughtExceptionHandler().uncaughtException(current, e);
                 }
                 finally {
                     calculateRepetitiveExecutionTime();
@@ -264,7 +265,9 @@ public class TimedTask {
             }
             else {
                 Duration duration = Duration.between(LocalDateTime.now(), getNextExecution());
-                Thread.sleep(duration);
+                if (!duration.isNegative()) {
+                    Thread.sleep(duration);
+                }
                 // timer thread sleeps
                 // task thread terminates once finished
             }

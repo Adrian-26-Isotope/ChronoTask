@@ -2,6 +2,7 @@ package adrian.os.java.timer;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -58,7 +59,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      * @param threadPool the executor service to use for task execution
      */
     public TimedTaskPoolExecutor(final AbstractExecutorService threadPool) {
-        this.threadPool = threadPool;
+        this.threadPool = Objects.requireNonNull(threadPool);
     }
 
     /**

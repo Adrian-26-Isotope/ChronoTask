@@ -41,7 +41,9 @@ public class TimedTaskBuilder {
      * @return this builder instance for method chaining
      */
     public TimedTaskBuilder setInitialDelay(final Duration initialDelay) {
-        this.initialDelay = Duration.ofNanos(initialDelay.toNanos());
+        if (!initialDelay.isNegative()) {
+            this.initialDelay = initialDelay.multipliedBy(1);
+        }
         return this;
     }
 
@@ -59,7 +61,7 @@ public class TimedTaskBuilder {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
-        this.periodicDelay = Duration.ofNanos(delay.toNanos());
+        this.periodicDelay = delay.multipliedBy(1);
         this.repetitiveDelay = null;
         return this;
     }
@@ -78,7 +80,7 @@ public class TimedTaskBuilder {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
-        this.repetitiveDelay = Duration.ofNanos(delay.toNanos());
+        this.repetitiveDelay = delay.multipliedBy(1);
         this.periodicDelay = null;
         return this;
     }
@@ -91,7 +93,7 @@ public class TimedTaskBuilder {
      * @return this builder instance for method chaining.
      */
     public TimedTaskBuilder setName(final String name) {
-        this.name = String.valueOf(name);
+        this.name = new String(name);
         return this;
     }
 

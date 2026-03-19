@@ -226,7 +226,7 @@ poolExecutor.shutdown();
 - **Named Tasks**: Optional naming propagates to execution threads for debugging:
   - Timer thread: `[TaskName]Timer`
   - Task execution threads: `[TaskName]Task#1`, `[TaskName]Task#2`, etc.
-- **Simple State Model**: Two states only - `RUNNING` or `NOT_RUNNING` - easy to understand and use
+- **Simple State Model**: Three states - `RUNNING`, `SHUTDOWN` (transient), and `STOPPED` - easy to understand and use
 
 ```java
 // TimedTask - rich introspection and self-control
@@ -323,9 +323,10 @@ The `TimedTask` class is the central component representing an individual schedu
 
 - **Task Logic**: Stores the user-defined task as a `Consumer<TimedTask>`, allowing tasks to receive a reference to themselves for introspection and self-control.
 
-- **Lifecycle State**: Maintains an internal state machine with two states:
+- **Lifecycle State**: Maintains an internal state machine with three states:
   - `RUNNING`: Task is actively scheduled and executing
-  - `NOT_RUNNING`: Task is stopped
+  - `SHUTDOWN`: Transitional state — `stop()` has been called; timer thread is winding down
+  - `STOPPED`: Task is fully stopped
 
 - **Timing Configuration**: Holds three optional `Duration` fields:
   - `initialDelay`: Delay before the first execution
@@ -362,9 +363,9 @@ The `TimedTaskBuilder` class implements the Builder pattern for fluent, type-saf
 
 The `AbstractTimedTaskExecutor` is an abstract base class that defines the execution strategy pattern.
 
-- **Factory for Builders**: Provides two overloaded `createTask()` factory methods:
+- **Factory for Builders**: Provides two factory methods:
   - `createTask(Consumer<TimedTask>)` → returns a `TimedTaskBuilder`
-  - `createTask(Function<FutureTimedTask<T>, T>)` → returns a `FutureTimedTaskBuilder<T>`
+  - `createFutureTask(Function<FutureTimedTask<T>, T>)` → returns a `FutureTimedTaskBuilder<T>`
 - **Execution Abstraction**: Declares two abstract methods for execution:
   - `run(Runnable task)`: Execute task without naming
   - `run(Runnable task, String name)`: Execute task with thread naming support
@@ -423,7 +424,7 @@ The `AbstractTimedTaskExecutor` is an abstract base class that defines the execu
 **Key Design Decisions**:
 - `AtomicReference<CompletableFuture<T>>` ensures thread-safe future swapping with no races
 - `start()` is `synchronized` and installs a fresh future before starting the underlying task
-- Instances are created via `executor.createTask(Function<FutureTimedTask<T>, T>)` and `FutureTimedTaskBuilder<T>.build()`
+- Instances are created via `executor.createFutureTask(Function<FutureTimedTask<T>, T>)` and `FutureTimedTaskBuilder<T>.build()`
 
 #### 7. FutureTimedTaskBuilder\<T\>
 
@@ -431,7 +432,7 @@ The `FutureTimedTaskBuilder<T>` class mirrors `TimedTaskBuilder` for `FutureTime
 
 - **Same fluent API**: `setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`
 - **Builds `FutureTimedTask<T>`**: Constructs fully configured instances via `build()`
-- **Protected constructor**: Instantiated exclusively through `AbstractTimedTaskExecutor.createTask(Function)`
+- **Protected constructor**: Instantiated exclusively through `AbstractTimedTaskExecutor.createFutureTask(Function)`
 
 ### Component Interaction
 
@@ -1122,7 +1123,8 @@ Use the `start()` method to begin task execution. This transitions the task from
 **Start Behavior:**
 
 - **Returns `true`**: Task successfully started
-- **Returns `false`**: Task was already running (calling `start()` on a running task has no effect)
+- **Returns `false`**: Task was already `RUNNING` (calling `start()` on a running task has no effect)
+- **Blocks if shutting down**: If `stop()` was called but the timer thread has not fully terminated yet (`SHUTDOWN` state), `start()` waits until the task reaches `STOPPED`, then proceeds normally and returns `true`
 - **Immediate effect**: Timer thread created and scheduling begins immediately
 - **Initial delay**: If configured, first execution waits for initial delay period
 
@@ -1152,14 +1154,14 @@ The `start()` method is `synchronized`, making it safe to call from multiple thr
 
 #### Stopping Tasks
 
-Use the `stop()` method to halt task execution. This transitions the task to `NOT_RUNNING` state and terminates the timer thread gracefully.
+Use the `stop()` method to halt task execution and terminate the timer thread gracefully.
 
 **Stop Behavior:**
 
-- **Immediate interrupt**: `stop()` interrupts the timer thread immediately, so a sleeping timer wakes up and exits without waiting for the full sleep duration
-- **Graceful shutdown**: Timer thread terminates cleanly after the interrupt
+- **Transitions to `SHUTDOWN`**: `stop()` moves the task to the `SHUTDOWN` state and immediately interrupts the sleeping timer thread so it wakes up and exits without waiting for the full sleep duration
+- **Completes to `STOPPED`**: Once the timer thread exits it transitions the task to `STOPPED`
 - **No return value**: `stop()` is a `void` method (always succeeds)
-- **Idempotent**: Calling `stop()` on a stopped task is safe (no effect)
+- **Idempotent**: Calling `stop()` on a `STOPPED` task is safe (no effect)
 - **Current execution**: Any currently executing task instance completes normally
 - **Immediate scheduling halt**: No new executions are scheduled after `stop()`
 
@@ -1207,7 +1209,7 @@ Use the `isRunning()` method to check if a task is actively running.
 **State Check Behavior:**
 
 - **Returns `true`**: Task is in `RUNNING` state (timer thread active)
-- **Returns `false`**: Task is in `NOT_RUNNING` state (timer thread terminated)
+- **Returns `false`**: Task is in `SHUTDOWN` or `STOPPED` state (timer thread winding down or terminated)
 - **Thread-safe**: Safe to call from any thread
 - **Real-time**: Reflects current state accurately
 
@@ -1288,48 +1290,53 @@ monitoringTask.start();
 ```
 ┌─────────────────┐
 │  Task Created   │
-│  (NOT_RUNNING)  │
+│   (STOPPED)     │
 └────────┬────────┘
          │
          │ start() → returns true
          ▼
 ┌─────────────────┐
 │  Task Running   │
-│   (RUNNING)     │◄────┐
-└────────┬────────┘     │
-         │              │
-         │ stop()       │ start() → returns true
-         │              │ (restart)
-         ▼              │
-┌─────────────────┐     │
-│  Task Stopped   │     │
-│  (NOT_RUNNING)  │─────┘
+│   (RUNNING)     │◄──────────────┐
+└────────┬────────┘               │
+         │                        │
+         │ stop()                 │ start() → blocks until STOPPED,
+         ▼                        │           then returns true
+┌─────────────────┐               │
+│  Shutting Down  │               │
+│   (SHUTDOWN)    │               │
+└────────┬────────┘               │
+         │ timer thread exits     │
+         ▼                        │
+┌─────────────────┐               │
+│  Task Stopped   │───────────────┘
+│   (STOPPED)     │
 └─────────────────┘
 
 Note: start() on RUNNING task returns false (no state change)
-      stop() on NOT_RUNNING task has no effect (idempotent)
+      stop() on STOPPED task has no effect (idempotent)
 ```
 
 **Key Lifecycle Points:**
 
-1. **Creation**: Task starts in `NOT_RUNNING` state
-2. **Start**: Transitions to `RUNNING`, starts timer runnable
+1. **Creation**: Task starts in `STOPPED` state
+2. **Start**: Transitions to `RUNNING`, starts timer thread; blocks if currently in `SHUTDOWN`
 3. **Running**: Task executes according to configuration
-4. **Stop**: Transitions to `NOT_RUNNING`, terminates timer runnable
+4. **Stop**: Transitions to `SHUTDOWN`, interrupts sleeping timer thread; timer thread exits and transitions task to `STOPPED`
 5. **Restart**: Can repeat start-stop cycle indefinitely
 6. **Self-stop**: Task can stop itself from within execution
 7. **One-time**: Automatically stops after single execution (if no periodic/repetitive delay)
 
 ### Future-Based Tasks (FutureTimedTask)
 
-`FutureTimedTask<T>` is created via the `createTask(Function<FutureTimedTask<T>, T>)` overload on any executor. Use it when you need to receive the result of each execution as a `CompletableFuture<T>`.
+`FutureTimedTask<T>` is created via `createFutureTask(Function<FutureTimedTask<T>, T>)` on any executor. Use it when you need to receive the result of each execution as a `CompletableFuture<T>`.
 
 #### One-Shot with Result
 
 ```java
 TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
 
-FutureTimedTask<String> task = executor.createTask(futureTask -> {
+FutureTimedTask<String> task = executor.createFutureTask(futureTask -> {
     return fetchDataFromRemote();
 })
 .setName("RemoteFetch")
@@ -1344,7 +1351,7 @@ System.out.println("Got: " + data);
 #### Recurring with Result Chaining
 
 ```java
-FutureTimedTask<Integer> task = executor.createTask(t -> {
+FutureTimedTask<Integer> task = executor.createFutureTask(t -> {
     return computeMetric();
 })
 .setName("MetricCollector")

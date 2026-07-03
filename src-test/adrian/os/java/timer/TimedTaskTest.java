@@ -1087,23 +1087,24 @@ class TimedTaskTest {
 
     /**
      * Tests attempting to set negative initial delay.
-     * The system treats negative initial delays as zero (immediate execution).
+     * The builder should throw IllegalArgumentException for negative initial
+     * delays, consistent with setPeriodicDelay/setRepetitiveDelay.
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativeInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testNegativeInitialDelay(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
         TimedTaskBuilder builder = executor.createTask(createTask(0));
-        builder.setInitialDelay(Duration.ofMillis(-500));
-        TimedTask timer = builder.build();
 
-        timer.start();
-        Thread.sleep(20);
-
-        // Negative initial delay is treated as zero (immediate execution)
-        assertEquals(1, this.counter.get(), "Task should execute immediately with negative initial delay");
-
-        timer.stop();
+        // Attempt to set negative initial delay should throw exception
+        try {
+            builder.setInitialDelay(Duration.ofMillis(-500));
+            fail("Expected IllegalArgumentException for negative initial delay");
+        }
+        catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("negative"),
+                    "Exception message should mention 'negative': " + e.getMessage());
+        }
     }
 
     /**

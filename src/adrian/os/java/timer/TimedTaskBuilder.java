@@ -39,11 +39,13 @@ public class TimedTaskBuilder {
      *
      * @param initialDelay the initial delay before the first execution
      * @return this builder instance for method chaining
+     * @throws IllegalArgumentException if the given duration is negative
      */
     public TimedTaskBuilder setInitialDelay(final Duration initialDelay) {
-        if (!initialDelay.isNegative()) {
-            this.initialDelay = initialDelay.multipliedBy(1);
+        if (initialDelay.isNegative()) {
+            throw new IllegalArgumentException("a negative duration is not allowed.");
         }
+        this.initialDelay = DurationCopier.copyOf(initialDelay);
         return this;
     }
 
@@ -61,7 +63,7 @@ public class TimedTaskBuilder {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
-        this.periodicDelay = delay.multipliedBy(1);
+        this.periodicDelay = DurationCopier.copyOf(delay);
         this.repetitiveDelay = null;
         return this;
     }
@@ -80,7 +82,7 @@ public class TimedTaskBuilder {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
-        this.repetitiveDelay = delay.multipliedBy(1);
+        this.repetitiveDelay = DurationCopier.copyOf(delay);
         this.periodicDelay = null;
         return this;
     }

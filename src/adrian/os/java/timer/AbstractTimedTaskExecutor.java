@@ -26,7 +26,7 @@ public abstract class AbstractTimedTaskExecutor {
     /**
      * Creates a new {@link FutureTimedTaskBuilder} for the specified task.
      *
-     * @param <T> the result type of the callable
+     * @param <T>  the result type of the callable
      * @param task the callable to execute as part of the timed task
      * @return a new {@link FutureTimedTaskBuilder} instance for configuring the
      *         callable timed task
@@ -40,7 +40,7 @@ public abstract class AbstractTimedTaskExecutor {
      *
      * @param task to execute
      */
-    abstract void run(final Runnable task);
+    protected abstract void run(final Runnable task);
 
     /**
      * Executes the given task using the executor's execution strategy, with an
@@ -49,5 +49,5 @@ public abstract class AbstractTimedTaskExecutor {
      * @param task to execute
      * @param name the name to associate with the task
      */
-    abstract void run(final Runnable task, String name);
+    protected abstract void run(final Runnable task, String name);
 }

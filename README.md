@@ -1124,6 +1124,7 @@ Use the `start()` method to begin task execution. This transitions the task from
 
 - **Returns `true`**: Task successfully started
 - **Returns `false`**: Task was already `RUNNING` (calling `start()` on a running task has no effect)
+- **Returns `false` on rejected submission**: If the configured executor rejects the task submission (e.g. a `TimedTaskPoolExecutor` whose underlying pool has been shut down, throwing `RejectedExecutionException`), `start()` catches the rejection, rolls the task back to `STOPPED` (instead of leaving it stuck), and returns `false`. The task remains safely restartable once the executor is available again.
 - **Blocks if shutting down**: If `stop()` was called but the timer thread has not fully terminated yet (`SHUTDOWN` state), `start()` waits until the task reaches `STOPPED`, then proceeds normally and returns `true`
 - **Immediate effect**: Timer thread created and scheduling begins immediately
 - **Initial delay**: If configured, first execution waits for initial delay period
@@ -1314,6 +1315,7 @@ monitoringTask.start();
 └─────────────────┘
 
 Note: start() on RUNNING task returns false (no state change)
+      start() rejected by executor returns false and rolls back RUNNING → STOPPED
       stop() on STOPPED task has no effect (idempotent)
 ```
 

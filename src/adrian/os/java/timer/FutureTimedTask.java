@@ -52,19 +52,19 @@ public class FutureTimedTask<T> {
     }
 
     /**
-     * Starts the task and returns the {@link CompletableFuture} for the first
-     * upcoming execution. Each call to {@code start()} installs a fresh future so
-     * that restarting the task always produces a new, uncompleted future.
+     * Starts the task and returns the {@link CompletableFuture} for the next
+     * upcoming execution. If the task was previously stopped before its prior
+     * {@code start()}'s execution ever fired, that same future instance is
+     * reused rather than replaced, since it was never completed; it will be
+     * completed by whichever execution runs next.
      *
-     * @return the future that will be completed by the first execution, or
+     * @return the future that will be completed by the next execution, or
      *         {@code null} if the task is already running
      */
     public synchronized CompletableFuture<T> start() {
         if (isRunning()) {
             return null;
         }
-        // CompletableFuture<T> fresh = new CompletableFuture<>();
-        // this.nextResult.set(fresh);
         CompletableFuture<T> next = getNextResult();
         this.timedTask.start();
         return next;

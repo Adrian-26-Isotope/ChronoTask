@@ -309,6 +309,17 @@ class FutureTimedTaskTest {
     }
 
     /**
+     * Tests that a negative initial delay throws IllegalArgumentException.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testNegativeInitialDelayThrows(final AbstractTimedTaskExecutor executor) {
+        this.currentExecutor = executor;
+        assertThrows(IllegalArgumentException.class,
+                () -> executor.createFutureTask(_ -> 1).setInitialDelay(Duration.ofMillis(-100)));
+    }
+
+    /**
      * Tests that a negative periodic delay throws IllegalArgumentException.
      */
     @ParameterizedTest

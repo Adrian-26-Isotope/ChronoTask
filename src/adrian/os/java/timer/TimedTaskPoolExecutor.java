@@ -75,13 +75,20 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      * {@code <name>}. The original thread name is restored after the runnable
      * completes.
      * </p>
+     * <p>
+     * The runnable is dispatched via
+     * {@link AbstractExecutorService#execute(Runnable)}, so any {@code Throwable}
+     * thrown from within the runnable propagates uncaught
+     * out of the pool thread and reaches that thread's
+     * {@link Thread#getUncaughtExceptionHandler() UncaughtExceptionHandler}.
+     * </p>
      *
      * @param runnable the task to execute
      * @param name     the name to assign to the thread during execution
      */
     @Override
-    void run(final Runnable runnable, final String name) {
-        this.threadPool.submit(() -> {
+    protected void run(final Runnable runnable, final String name) {
+        this.threadPool.execute(() -> {
             Thread current = Thread.currentThread();
             String oldName = current.getName();
             current.setName((this.name != null) ? this.name + "/" + name : name);
@@ -97,15 +104,23 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
     /**
      * Executes the given runnable using the configured thread pool.
      * <p>
-     * The task is submitted to the thread pool for execution. The thread pool
-     * manages thread allocation and lifecycle.
+     * The task is dispatched to the thread pool via
+     * {@link AbstractExecutorService#execute(Runnable)} for execution. The
+     * thread pool manages thread allocation and lifecycle.
+     * </p>
+     * <p>
+     * The runnable is dispatched via
+     * {@link AbstractExecutorService#execute(Runnable)}, so any {@code Throwable}
+     * thrown from within the runnable propagates uncaught
+     * out of the pool thread and reaches that thread's
+     * {@link Thread#getUncaughtExceptionHandler() UncaughtExceptionHandler}.
      * </p>
      *
      * @param runnable the task to execute
      */
     @Override
-    void run(final Runnable runnable) {
-        this.threadPool.submit(runnable);
+    protected void run(final Runnable runnable) {
+        this.threadPool.execute(runnable);
     }
 
     /**

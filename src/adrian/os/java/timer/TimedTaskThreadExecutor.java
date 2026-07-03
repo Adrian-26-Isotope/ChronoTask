@@ -32,7 +32,7 @@ public class TimedTaskThreadExecutor extends AbstractTimedTaskExecutor {
      * @param runnable the task to execute
      */
     @Override
-    void run(final Runnable runnable) {
+    protected void run(final Runnable runnable) {
         Thread taskThread = this.threadFactory.newThread(runnable);
         taskThread.start();
     }
@@ -46,7 +46,7 @@ public class TimedTaskThreadExecutor extends AbstractTimedTaskExecutor {
      * @param name the name to assign to the thread executing the task
      */
     @Override
-    void run(final Runnable runnable, final String name) {
+    protected void run(final Runnable runnable, final String name) {
         Thread taskThread = this.threadFactory.newThread(runnable);
         taskThread.setName(name);
         taskThread.start();

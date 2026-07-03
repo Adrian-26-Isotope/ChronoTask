@@ -3,6 +3,7 @@ package adrian.os.java.timer;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Consumer;
 
 /**
@@ -61,12 +62,21 @@ public class TimedTask {
         if (getState() == State.STOPPED) {
             setState(State.RUNNING);
             setNextExecutionTime(LocalDateTime.now().plus(this.initialDelay));
-            if ((this.name == null) || this.name.isBlank()) {
-                this.executor.run(this.timer::runTimer);
+            try {
+                if ((this.name == null) || this.name.isBlank()) {
+                    this.executor.run(this.timer::runTimer);
+                }
+                else {
+                    String timerName = "[" + this.name + "]Timer";
+                    this.executor.run(this.timer::runTimer, timerName);
+                }
             }
-            else {
-                String timerName = "[" + this.name + "]Timer";
-                this.executor.run(this.timer::runTimer, timerName);
+            catch (RejectedExecutionException e) {
+                // submission was dropped/rejected: roll back so the task cannot get stuck.
+                setState(State.STOPPED);
+                setNextExecutionTime(null);
+                notifyAll();
+                return false;
             }
             return true;
         }

@@ -8,7 +8,7 @@ import org.junit.platform.suite.api.Suite;
  *
  */
 @Suite
-@SelectClasses({ TimedTaskTest.class, FutureTimedTaskTest.class, BugReproductionTest.class })
+@SelectClasses({ TimedTaskTest.class, FutureTimedTaskTest.class, SystemTest.class })
 public class TimedTaskTestSuite {
 
 }

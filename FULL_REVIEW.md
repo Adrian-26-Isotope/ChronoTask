@@ -10,10 +10,10 @@ TimedTask is a small, thoughtfully-documented scheduling library built on a hand
 
 | Severity | Category | Location | Finding |
 |---|---|---|---|
-| **High** | Architecture | [TimedTaskPoolExecutor.java](src/adrian/os/java/timer/TimedTaskPoolExecutor.java) | Constructors call `CustomThreadPool.builder()....build()` instead of `.start()` — the pool never leaves `NOT_RUNNING`, so every submitted task is silently rejected. |
-| **High** | Architecture | [pom.xml](pom.xml) (root) | No `<testSourceDirectory>`/JUnit/Surefire config — `mvn test` reports "No tests to run"; all of `src-test/` is never compiled or executed. This is why the above defect shipped undetected. |
-| **High** | Design + Concurrency | [FutureTimedTask.java](src/adrian/os/java/timer/FutureTimedTask.java#L61-L69) `start()` | The boolean result of `TimedTask.start()` is discarded. If the underlying start fails (e.g. pool shutdown races with `start()`), the caller gets a `CompletableFuture` that never completes — `future.get()` hangs forever. |
-| **High** | Design + Concurrency | [TimedTask.java](src/adrian/os/java/timer/TimedTask.java) setters vs. `start()`/`Timer` | Config fields (`initialDelay`, `periodicDelay`, `repetitiveDelay`, `name`) are written without `synchronized`/`volatile` while read from `start()` and the timer thread — a TOCTOU + cross-thread visibility race if configuration and `start()` happen on different threads. |
+| **High** | Architecture | [TimedTaskPoolExecutor.java](src/adrian/os/java/timer/TimedTaskPoolExecutor.java) | ✅ **FIXED** — Constructors call `CustomThreadPool.builder()....build()` instead of `.start()` — the pool never leaves `NOT_RUNNING`, so every submitted task is silently rejected. Constructors now call `.start()`. |
+| **High** | Architecture | [pom.xml](pom.xml) (root) | ✅ **FIXED** — No `<testSourceDirectory>`/JUnit/Surefire config — `mvn test` reports "No tests to run"; all of `src-test/` is never compiled or executed. This is why the above defect shipped undetected. Added `<testSourceDirectory>` and JUnit Jupiter/Platform Suite test dependencies. |
+| **High** | Design + Concurrency | [FutureTimedTask.java](src/adrian/os/java/timer/FutureTimedTask.java#L61-L69) `start()` | ✅ **FIXED** — The boolean result of `TimedTask.start()` is discarded. If the underlying start fails (e.g. pool shutdown races with `start()`), the caller gets a `CompletableFuture` that never completes — `future.get()` hangs forever. `start()` now returns `null` instead of a hanging future when the underlying start fails. |
+| **High** | Design + Concurrency | [TimedTask.java](src/adrian/os/java/timer/TimedTask.java) setters vs. `start()`/`Timer` | ✅ **FIXED** — Config fields (`initialDelay`, `periodicDelay`, `repetitiveDelay`, `name`) are written without `synchronized`/`volatile` while read from `start()` and the timer thread — a TOCTOU + cross-thread visibility race if configuration and `start()` happen on different threads. Fields are now `volatile` and the setters are `synchronized`. |
 | **High** | Concurrency | [TimedTask.java](src/adrian/os/java/timer/TimedTask.java) `Timer.loopTimer()` | In periodic mode, the next firing is scheduled *before* the current execution completes (only submitted, not awaited) — a slow task can cause two invocations to run concurrently, racing on `FutureTimedTask.nextResult`/`lastResult`. |
 | Medium | Architecture | [pom.xml](pom.xml), [.gitmodules](.gitmodules), [.gitignore](.gitignore) | No real Maven reactor between root and the `CustomJavaThreadPool` submodule; local-only build helpers (`.mvn/settings.xml`, `mvn-jdk25.bat`) are gitignored — a fresh clone has no documented, reproducible build path. |
 | Medium | Architecture + Design | [TimedTaskBuilder.java](src/adrian/os/java/timer/TimedTaskBuilder.java) / [FutureTimedTaskBuilder.java](src/adrian/os/java/timer/FutureTimedTaskBuilder.java) | ~90% duplicated fields, validation, and mutual-exclusion logic between the two builders — any invariant change must be applied twice. |
@@ -63,8 +63,8 @@ Despite the small size, the codebase shows unusually thorough internal documenta
 
 #### Findings
 
-1. **High** — `TimedTaskPoolExecutor` never starts its owned thread pool. Constructors call `.build()` not `.start()`, so the pool stays `NOT_RUNNING` and every submission is rejected and silently swallowed by `TimedTask.start()`.
-2. **High** — Root module's test suite is disconnected from the Maven build. `mvn test` reports "No tests to run"; no `<testSourceDirectory>`, JUnit dependency, or Surefire config in root `pom.xml`. This directly explains why Finding #1 went undetected.
+1. **High — ✅ FIXED** — `TimedTaskPoolExecutor` never starts its owned thread pool. Constructors call `.build()` not `.start()`, so the pool stays `NOT_RUNNING` and every submission is rejected and silently swallowed by `TimedTask.start()`. Constructors now call `.start()`.
+2. **High — ✅ FIXED** — Root module's test suite is disconnected from the Maven build. `mvn test` reports "No tests to run"; no `<testSourceDirectory>`, JUnit dependency, or Surefire config in root `pom.xml`. This directly explains why Finding #1 went undetected. `testSourceDirectory` and JUnit test dependencies added to root `pom.xml`.
 3. **Medium** — No real Maven module relationship between root and the thread-pool submodule; local-only build helpers are gitignored, leaving no documented reproducible build path for a fresh clone.
 4. **Medium** — Significant duplication between `TimedTaskBuilder` and `FutureTimedTaskBuilder`.
 5. **Medium** — Wall-clock-based scheduling (`LocalDateTime.now()`) is vulnerable to system clock changes; a monotonic-clock (`System.nanoTime()`) approach would be more robust.
@@ -105,8 +105,8 @@ Class/module-level review of the timer core and thread pool packages.
 
 **High**
 
-1. `FutureTimedTask.start()` silently discards the underlying start result — can hand out a future that never completes.
-2. Configuration setters on `TimedTask` are not synchronized against `start()`, risking a visibility/data race across threads.
+1. ✅ **FIXED** — `FutureTimedTask.start()` silently discards the underlying start result — can hand out a future that never completes. Now returns `null` instead when the start fails.
+2. ✅ **FIXED** — Configuration setters on `TimedTask` are not synchronized against `start()`, risking a visibility/data race across threads. Fields are now `volatile` and setters `synchronized`.
 
 **Medium**
 
@@ -174,9 +174,9 @@ The `CustomThreadPool` implementation is unusually well-documented about its own
 
 #### Findings
 
-1. **High** — Overlapping periodic executions share task state without synchronization: `loopTimer()` schedules the next firing *before* the current execution completes (only submitted, not awaited). For `FutureTimedTask`, this races on `nextResult`/`lastResult`, potentially mismatching futures to results. Repetitive mode is *not* affected (inherently serialized).
-2. **High** — `FutureTimedTask.start()` ignores `TimedTask.start()`'s return value; if the underlying start fails (e.g. racing with pool shutdown), a caller gets a future that never completes.
-3. **Medium** — Task configuration fields (`initialDelay`, `periodicDelay`, `repetitiveDelay`, `name`) are neither `volatile` nor synchronized — TOCTOU and cross-thread visibility risk against `start()`/`Timer`.
+1. **High** — Overlapping periodic executions share task state without synchronization: `loopTimer()` schedules the next firing *before* the current execution completes (only submitted, not awaited). For `FutureTimedTask`, this races on `nextResult`/`lastResult`, potentially mismatching futures to results. Repetitive mode is *not* affected (inherently serialized). *(Not yet fixed.)*
+2. **High — ✅ FIXED** — `FutureTimedTask.start()` ignores `TimedTask.start()`'s return value; if the underlying start fails (e.g. racing with pool shutdown), a caller gets a future that never completes. Now returns `null` in that case.
+3. **Medium — ✅ FIXED** — Task configuration fields (`initialDelay`, `periodicDelay`, `repetitiveDelay`, `name`) are neither `volatile` nor synchronized — TOCTOU and cross-thread visibility risk against `start()`/`Timer`. Fields are now `volatile` and setters `synchronized`.
 4. **Medium** — Zero idle time (`Duration.ZERO`, settable and the coerced value for negative durations) causes core workers to busy-spin instead of blocking.
 5. **Low–Medium** — Graceful `shutdown()` doesn't wake idle workers, so `awaitTermination()` latency is bounded by the full `idleTime` (default 60s) even with an empty queue — confirmed by the pool's own `testShutdown()` test.
 6. **Low** — `TimedTask.start()` can block the caller indefinitely on a congested/unresponsive executor (largely theoretical given `CustomThreadPool`'s unbounded queue).
@@ -191,8 +191,8 @@ The `CustomThreadPool` implementation is unusually well-documented about its own
 
 ## Top Priorities
 
-1. **Fix `TimedTaskPoolExecutor` to call `.start()`, and wire the root `pom.xml` for tests.** These two Architecture findings are causally linked: the pool-executor bug is a complete functional break in a primary public API, and it shipped because the test suite that would have caught it (`src-test/`) is never compiled or run by `mvn test`. Fix the build wiring first (or alongside), then add a regression test asserting successful execution immediately after construction.
-2. **Propagate `TimedTask.start()`'s success/failure through `FutureTimedTask.start()`.** Raised independently by both Design and Concurrency reviews — currently a caller can be handed a `CompletableFuture` that hangs forever whenever the underlying start silently fails (e.g. racing with pool shutdown).
-3. **Fix overlapping periodic executions.** The most subtle correctness bug found: a slow task on a short periodic interval can run concurrently with itself, corrupting which result pairs with which logical execution in `FutureTimedTask`.
-4. **Synchronize/`volatile`-ize `TimedTask`'s configuration fields.** Also flagged independently by two reviews — a genuine cross-thread visibility gap in an otherwise carefully synchronized class.
+1. ✅ **FIXED** — **Fix `TimedTaskPoolExecutor` to call `.start()`, and wire the root `pom.xml` for tests.** These two Architecture findings are causally linked: the pool-executor bug is a complete functional break in a primary public API, and it shipped because the test suite that would have caught it (`src-test/`) is never compiled or run by `mvn test`. Fix the build wiring first (or alongside), then add a regression test asserting successful execution immediately after construction.
+2. ✅ **FIXED** — **Propagate `TimedTask.start()`'s success/failure through `FutureTimedTask.start()`.** Raised independently by both Design and Concurrency reviews — currently a caller can be handed a `CompletableFuture` that hangs forever whenever the underlying start silently fails (e.g. racing with pool shutdown).
+3. **Fix overlapping periodic executions.** *(Not yet fixed.)* The most subtle correctness bug found: a slow task on a short periodic interval can run concurrently with itself, corrupting which result pairs with which logical execution in `FutureTimedTask`.
+4. ✅ **FIXED** — **Synchronize/`volatile`-ize `TimedTask`'s configuration fields.** Also flagged independently by two reviews — a genuine cross-thread visibility gap in an otherwise carefully synchronized class.
 5. **Bound thread-pool growth by default** (`maxThreads`, bounded queue + rejection policy) and **document the build/module relationship** for the submodule. Neither is an active exploit, but both are foot-guns for anyone deploying or building on top of this library today.

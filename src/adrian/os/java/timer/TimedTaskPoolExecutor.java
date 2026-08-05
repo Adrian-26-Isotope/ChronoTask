@@ -34,7 +34,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      */
     public TimedTaskPoolExecutor() {
         this.name = null;
-        this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).build();
+        this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).start();
     }
 
     /**
@@ -49,7 +49,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
     public TimedTaskPoolExecutor(final String name) {
         this.name = name;
         this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name)
-                .build();
+                .start();
     }
 
     /**

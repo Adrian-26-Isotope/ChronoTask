@@ -24,10 +24,10 @@ public class TimedTask {
     private final AbstractTimedTaskExecutor executor;
 
     /* optional fields */
-    private String name = "";
-    private Duration initialDelay;
-    private Duration periodicDelay;
-    private Duration repetitiveDelay;
+    private volatile String name = "";
+    private volatile Duration initialDelay;
+    private volatile Duration periodicDelay;
+    private volatile Duration repetitiveDelay;
 
     /* internal fields */
     private long count = 0;
@@ -102,7 +102,7 @@ public class TimedTask {
      * @param name optional name for tasks
      * @return false, if called in RUNNING state.
      */
-    protected boolean setName(final String name) {
+    protected synchronized boolean setName(final String name) {
         if (!isRunning()) {
             this.name = name;
             return true;
@@ -152,7 +152,7 @@ public class TimedTask {
      * @param delay the initial delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setInitialDelay(final Duration delay) {
+    protected synchronized boolean setInitialDelay(final Duration delay) {
         if (!isRunning()) {
             this.initialDelay = delay;
             return true;
@@ -164,7 +164,7 @@ public class TimedTask {
      * @param repeatDelay the repetitive delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setRepetitiveDelay(final Duration repeatDelay) {
+    protected synchronized boolean setRepetitiveDelay(final Duration repeatDelay) {
         if (!isRunning()) {
             this.repetitiveDelay = repeatDelay;
             return true;
@@ -176,7 +176,7 @@ public class TimedTask {
      * @param periodDelay the periodic delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setPeriodicDelay(final Duration periodDelay) {
+    protected synchronized boolean setPeriodicDelay(final Duration periodDelay) {
         if (!isRunning()) {
             this.periodicDelay = periodDelay;
             return true;

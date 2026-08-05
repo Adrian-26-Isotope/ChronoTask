@@ -59,15 +59,15 @@ public class FutureTimedTask<T> {
      * completed by whichever execution runs next.
      *
      * @return the future that will be completed by the next execution, or
-     *         {@code null} if the task is already running
+     *         {@code null} if the task is already running or failed to start
      */
     public synchronized CompletableFuture<T> start() {
         if (isRunning()) {
             return null;
         }
         CompletableFuture<T> next = getNextResult();
-        this.timedTask.start();
-        return next;
+        boolean started = this.timedTask.start();
+        return started ? next : null;
     }
 
     /**

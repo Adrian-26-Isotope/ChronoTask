@@ -66,7 +66,7 @@ class SystemTest {
                         latch.countDown();
                     });
                     return thread;
-                }).build();
+                }).start();
 
         TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor(pool);
         try {
@@ -135,7 +135,7 @@ class SystemTest {
     @Test
     void testStartDoesNotDeadlockWhenPoolExecutorRejectsSubmission() throws Exception {
         CustomThreadPool pool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2))
-                .setName("dropped-submission-pool").build();
+                .setName("dropped-submission-pool").start();
         TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor(pool);
         // shut down the pool BEFORE the task ever gets a chance to run
         executor.shutdown();

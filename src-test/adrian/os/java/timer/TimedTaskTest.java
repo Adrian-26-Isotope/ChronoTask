@@ -49,7 +49,7 @@ class TimedTaskTest {
     static Stream<Arguments> executorProvider() {
         return Stream.of(Arguments.of(new TimedTaskThreadExecutor()),
                 Arguments.of(new TimedTaskPoolExecutor(CustomThreadPool.builder().setMinThreads(0)
-                        .setIdleTime(Duration.ofSeconds(2)).setName("test-pool").build())));
+                        .setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
     }
 
     @ParameterizedTest

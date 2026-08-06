@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 
 /**
@@ -28,6 +29,7 @@ public class TimedTask {
     private volatile Duration initialDelay;
     private volatile Duration periodicDelay;
     private volatile Duration repetitiveDelay;
+    private volatile Semaphore executionThrottle = new Semaphore(Integer.MAX_VALUE);
 
     /* internal fields */
     private long count = 0;
@@ -185,6 +187,22 @@ public class TimedTask {
     }
 
     /**
+     * Bounds how many executions of this task may run concurrently. Only relevant
+     * in periodic mode, where a slow task can otherwise overlap with subsequent
+     * firings; defaults to unbounded ({@link Integer#MAX_VALUE}).
+     *
+     * @param max the maximum number of concurrent executions to allow
+     * @return false, if called in RUNNING state.
+     */
+    protected synchronized boolean setMaxConcurrentExecutions(final int max) {
+        if (!isRunning()) {
+            this.executionThrottle = new Semaphore(max);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * encapsulate timer thread code
      */
     private class Timer {
@@ -216,8 +234,10 @@ public class TimedTask {
                 LocalDateTime next;
                 while (isAlive() && ((next = getNextExecution()) != null)) {
                     if (next.compareTo(LocalDateTime.now()) <= 0) {
+                        Semaphore throttle = TimedTask.this.executionThrottle;
+                        throttle.acquire();
                         calculatePeriodicExecutionTime(next);
-                        executeTask();
+                        executeTask(throttle);
                     }
                     waitTillNextExecution();
                 }
@@ -231,7 +251,7 @@ public class TimedTask {
             return isRunning() && !Thread.currentThread().isInterrupted();
         }
 
-        private void executeTask() {
+        private void executeTask(final Semaphore throttle) {
             Runnable task = () -> {
                 try {
                     TimedTask.this.task.accept(TimedTask.this);
@@ -242,6 +262,7 @@ public class TimedTask {
                 }
                 finally {
                     calculateRepetitiveExecutionTime();
+                    throttle.release();
                 }
             };
 

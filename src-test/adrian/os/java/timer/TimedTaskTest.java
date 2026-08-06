@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -567,8 +568,7 @@ class TimedTaskTest {
                 // First execution: 100ms, second: 300ms, third: 100ms
                 long sleepTime = (count == 2) ? 300 : 100;
                 Thread.sleep(sleepTime);
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
@@ -883,8 +883,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(taskDuration);
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             synchronized (executionEndTimes) {
@@ -1039,8 +1038,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(Duration.ofSeconds(5)); // Long sleep to be interrupted
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 interruptHandled[0] = true;
                 Thread.currentThread().interrupt(); // Restore interrupt status
             }
@@ -1074,12 +1072,10 @@ class TimedTaskTest {
         try {
             TimedTask timer = executor.createTask(null).build();
             timer.start();
-        }
-        catch (NullPointerException _) {
+        } catch (NullPointerException _) {
             // This is expected behavior - null task not allowed
             assertTrue(true, "NullPointerException expected for null task");
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             // Some other exception is also acceptable
             assertTrue(true, "Exception expected for null task: " + e.getClass().getSimpleName());
         }
@@ -1100,8 +1096,7 @@ class TimedTaskTest {
         try {
             builder.setInitialDelay(Duration.ofMillis(-500));
             fail("Expected IllegalArgumentException for negative initial delay");
-        }
-        catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("negative"),
                     "Exception message should mention 'negative': " + e.getMessage());
         }
@@ -1122,8 +1117,7 @@ class TimedTaskTest {
         try {
             builder.setPeriodicDelay(Duration.ofMillis(-300));
             fail("Expected IllegalArgumentException for negative periodic delay");
-        }
-        catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("negative"),
                     "Exception message should mention 'negative': " + e.getMessage());
         }
@@ -1144,8 +1138,7 @@ class TimedTaskTest {
         try {
             builder.setRepetitiveDelay(Duration.ofMillis(-300));
             fail("Expected IllegalArgumentException for negative repetitive delay");
-        }
-        catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("negative"),
                     "Exception message should mention 'negative': " + e.getMessage());
         }
@@ -1338,8 +1331,7 @@ class TimedTaskTest {
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(100); // Give external thread time to also call stop()
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             timedTask.stop(); // Task stops itself
@@ -1382,8 +1374,7 @@ class TimedTaskTest {
                 counters[index].incrementAndGet();
                 try {
                     Thread.sleep(50); // Small delay to simulate work
-                }
-                catch (InterruptedException _) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             };
@@ -1532,8 +1523,7 @@ class TimedTaskTest {
                 sharedCounter.incrementAndGet();
                 try {
                     Thread.sleep(50); // Simulate work
-                }
-                catch (InterruptedException _) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             };
@@ -1699,8 +1689,7 @@ class TimedTaskTest {
                 this.counter.incrementAndGet();
                 Thread.sleep(Duration.ofSeconds(10));
                 this.counter.incrementAndGet();
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
@@ -1806,8 +1795,7 @@ class TimedTaskTest {
             try {
                 this.counter.incrementAndGet();
                 Thread.sleep(Duration.ofSeconds(2));
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
@@ -1921,6 +1909,137 @@ class TimedTaskTest {
         assertTrue(elapsed < 500, "stop() should return promptly (< 500ms), but took " + elapsed + "ms");
     }
 
+    /**
+     * Tests that setMaxConcurrentExecutions(2) bounds overlapping periodic
+     * executions to exactly 2 concurrent invocations when the task duration is
+     * much longer than the periodic delay.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testMaxConcurrentExecutionsThrottlesOverlap(final AbstractTimedTaskExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicInteger peak = new AtomicInteger(0);
+        TimedTaskBuilder builder = executor.createTask(createThrottleTrackingTask(500, inFlight, peak));
+        builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(2);
+        TimedTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(1200);
+        timer.stop();
+
+        assertTrue(peak.get() <= 2, "Peak concurrent executions should never exceed the configured limit of 2");
+        assertTrue(peak.get() >= 2, "Peak concurrent executions should actually reach 2 (bounded overlap)");
+    }
+
+    /**
+     * Tests that setMaxConcurrentExecutions(1) fully serializes periodic
+     * executions, equivalent to no overlap at all.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testMaxConcurrentExecutionsSerializesWhenSetToOne(final AbstractTimedTaskExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicInteger peak = new AtomicInteger(0);
+        TimedTaskBuilder builder = executor.createTask(createThrottleTrackingTask(300, inFlight, peak));
+        builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(1);
+        TimedTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(1000);
+        timer.stop();
+
+        assertEquals(1, peak.get(), "Peak concurrent executions should be exactly 1 when the limit is 1");
+    }
+
+    /**
+     * Tests that periodic executions overlap without bound by default (no
+     * setMaxConcurrentExecutions() call), locking in the intentional
+     * overlap-by-default behavior.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testMaxConcurrentExecutionsDefaultAllowsUnboundedOverlap(final AbstractTimedTaskExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicInteger peak = new AtomicInteger(0);
+        TimedTaskBuilder builder = executor.createTask(createThrottleTrackingTask(1000, inFlight, peak));
+        builder.setPeriodicDelay(Duration.ofMillis(300));
+        TimedTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(900);
+        timer.stop();
+
+        assertTrue(peak.get() > 1, "Overlap should occur by default without an explicit throttle");
+    }
+
+    /**
+     * Tests that setMaxConcurrentExecutions() rejects zero and negative values.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testSetMaxConcurrentExecutionsRejectsInvalidValue(final AbstractTimedTaskExecutor executor) {
+        this.currentExecutor = executor;
+        TimedTaskBuilder builder = executor.createTask(createTask(0));
+
+        assertThrowsExactly(IllegalArgumentException.class, () -> builder.setMaxConcurrentExecutions(0));
+        assertThrowsExactly(IllegalArgumentException.class, () -> builder.setMaxConcurrentExecutions(-1));
+    }
+
+    /**
+     * Tests that setMaxConcurrentExecutions() returns false when the task is
+     * already running.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testSetMaxConcurrentExecutionsReturnsFalseWhenRunning(final AbstractTimedTaskExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        builder.setPeriodicDelay(Duration.ofSeconds(10));
+        TimedTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(150);
+
+        assertFalse(timer.setMaxConcurrentExecutions(3),
+                "setMaxConcurrentExecutions() should return false while the task is running");
+
+        timer.stop();
+    }
+
+    /**
+     * Tests that stop() promptly unblocks a timer thread waiting on the
+     * throttle's acquire() call, avoiding a hang.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testStopWhileBlockedOnThrottle(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+        this.currentExecutor = executor;
+        TimedTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
+        builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(1);
+        TimedTask timer = builder.build();
+
+        timer.start();
+        // First execution starts immediately and holds the single permit; the timer
+        // thread will block on acquire() for the next firing shortly after.
+        Thread.sleep(300);
+
+        timer.stop();
+
+        long deadline = System.currentTimeMillis() + 3000;
+        while ((timer.getState() != State.STOPPED) && (System.currentTimeMillis() < deadline)) {
+            Thread.sleep(20);
+        }
+
+        assertEquals(State.STOPPED, timer.getState(), "Task should reach STOPPED promptly, not hang, after stop()");
+    }
+
     // ========== Helper Methods ==========
 
     private Consumer<TimedTask> createTask(final int seconds) {
@@ -1928,9 +2047,27 @@ class TimedTaskTest {
             try {
                 this.counter.incrementAndGet();
                 Thread.sleep(Duration.ofSeconds(seconds));
-            }
-            catch (InterruptedException _) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
+            }
+        };
+    }
+
+    /**
+     * Creates a task that tracks the number of concurrently in-flight executions,
+     * recording the highest concurrency level observed in {@code peak}.
+     */
+    private Consumer<TimedTask> createThrottleTrackingTask(final long durationMillis, final AtomicInteger inFlight,
+            final AtomicInteger peak) {
+        return _ -> {
+            int current = inFlight.incrementAndGet();
+            peak.updateAndGet(p -> Math.max(p, current));
+            try {
+                Thread.sleep(durationMillis);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            } finally {
+                inFlight.decrementAndGet();
             }
         };
     }

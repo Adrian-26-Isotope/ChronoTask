@@ -11,9 +11,11 @@ import java.util.function.Function;
 /**
  * A timed task that exposes execution results via {@link CompletableFuture}.
  * <p>
- * Each execution atomically captures the pending future, executes the task, and
- * completes that future with the result. A fresh future is installed for the
- * following execution so callers can chain results without a race.
+ * Each execution runs the task first, then atomically claims whichever future is
+ * currently exposed and completes it with the result, installing a fresh future for
+ * the following execution. Because the claim happens at completion time rather than
+ * at dispatch time, overlapping executions are published in the order they finish,
+ * not the order they started.
  * </p>
  * <p>
  * Instances are created via {@link AbstractTimedTaskExecutor#createFutureTask(Function)}.
@@ -37,14 +39,21 @@ public class FutureTimedTask<T> {
         this.nextResult = new AtomicReference<>(new CompletableFuture<>());
 
         Consumer<TimedTask> consumer = _ -> {
-            CompletableFuture<T> currentFuture = this.nextResult.getAndSet(new CompletableFuture<>());
+            T result = null;
+            Exception failure = null;
             try {
-                T result = task.apply(FutureTimedTask.this);
+                result = task.apply(FutureTimedTask.this);
+            }
+            catch (final Exception e) {
+                failure = e;
+            }
+            CompletableFuture<T> currentFuture = this.nextResult.getAndSet(new CompletableFuture<>());
+            if (failure == null) {
                 this.lastResult = result;
                 currentFuture.complete(result);
             }
-            catch (final Exception e) {
-                currentFuture.completeExceptionally(e);
+            else {
+                currentFuture.completeExceptionally(failure);
             }
         };
 
@@ -98,13 +107,19 @@ public class FutureTimedTask<T> {
     }
 
     /**
-     * Returns the {@link CompletableFuture} for the next upcoming execution.
+     * Returns the {@link CompletableFuture} that will be completed by whichever
+     * execution's result becomes available next, in completion order rather than
+     * start order.
      * <p>
-     * For recurring tasks, call this method after waiting on the previous future to
-     * obtain the future for the following execution.
+     * Under overlapping executions this may be an execution that was already
+     * in-flight before this method was called, if that execution finishes first
+     * among the currently in-flight ones. For recurring tasks, call this method
+     * after waiting on the previous future to obtain the future for the following
+     * result.
      * </p>
      *
-     * @return the future that will be completed by the next execution
+     * @return the future that will be completed by the next result to become
+     *         available
      */
     public CompletableFuture<T> getNextResult() {
         return this.nextResult.get();
@@ -115,7 +130,7 @@ public class FutureTimedTask<T> {
      *            negative
      * @return false if the task is currently running
      */
-    public boolean setInitialDelay(final Duration delay) {
+    protected boolean setInitialDelay(final Duration delay) {
         return this.timedTask.setInitialDelay(delay);
     }
 
@@ -126,7 +141,7 @@ public class FutureTimedTask<T> {
      * @param delay the fixed delay between task executions
      * @return false if the task is currently running
      */
-    public boolean setPeriodicDelay(final Duration delay) {
+    protected boolean setPeriodicDelay(final Duration delay) {
         return this.timedTask.setPeriodicDelay(delay);
     }
 
@@ -137,7 +152,7 @@ public class FutureTimedTask<T> {
      * @param delay the delay between consecutive task executions
      * @return false if the task is currently running
      */
-    public boolean setRepetitiveDelay(final Duration delay) {
+    protected boolean setRepetitiveDelay(final Duration delay) {
         return this.timedTask.setRepetitiveDelay(delay);
     }
 
@@ -145,7 +160,19 @@ public class FutureTimedTask<T> {
      * @param name the name of the task
      * @return false if the task is currently running
      */
-    public boolean setName(final String name) {
+    protected boolean setName(final String name) {
         return this.timedTask.setName(name);
+    }
+
+    /**
+     * Bounds how many executions of this task may run concurrently. Only relevant
+     * in periodic mode, where a slow task can otherwise overlap with subsequent
+     * firings; defaults to unbounded ({@link Integer#MAX_VALUE}).
+     *
+     * @param max the maximum number of concurrent executions to allow
+     * @return false if the task is currently running
+     */
+    protected boolean setMaxConcurrentExecutions(final int max) {
+        return this.timedTask.setMaxConcurrentExecutions(max);
     }
 }

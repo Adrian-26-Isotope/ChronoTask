@@ -17,6 +17,7 @@ public class TimedTaskBuilder {
     private Duration periodicDelay = null;
     private Duration repetitiveDelay = null;
     private Duration initialDelay = Duration.ZERO;
+    private int maxConcurrentExecutions = Integer.MAX_VALUE;
 
     /**
      * @param task     the task to be executed by the timer.
@@ -100,6 +101,23 @@ public class TimedTaskBuilder {
     }
 
     /**
+     * Bounds how many executions of this task may run concurrently. Only relevant
+     * in periodic mode, where a slow task can otherwise overlap with subsequent
+     * firings. Defaults to unbounded ({@link Integer#MAX_VALUE}).
+     *
+     * @param max the maximum number of concurrent executions to allow
+     * @return this builder instance for method chaining
+     * @throws IllegalArgumentException if {@code max} is less than 1
+     */
+    public TimedTaskBuilder setMaxConcurrentExecutions(final int max) {
+        if (max < 1) {
+            throw new IllegalArgumentException("max concurrent executions must be at least 1.");
+        }
+        this.maxConcurrentExecutions = max;
+        return this;
+    }
+
+    /**
      * build the timer with configured settings. The task needs to be started
      * separately!
      *
@@ -113,6 +131,7 @@ public class TimedTaskBuilder {
         timer.setInitialDelay(this.initialDelay);
         timer.setPeriodicDelay(this.periodicDelay);
         timer.setRepetitiveDelay(this.repetitiveDelay);
+        timer.setMaxConcurrentExecutions(this.maxConcurrentExecutions);
         return timer;
     }
 

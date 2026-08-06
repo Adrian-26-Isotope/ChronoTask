@@ -144,14 +144,57 @@ class FutureTimedTaskTest {
     }
 
     /**
+     * Tests that the future returned by start() is completed by whichever
+     * overlapping execution finishes first (completion order), not necessarily by
+     * the execution that started first. The first invocation is slow and keeps
+     * running while the second, fast invocation completes first and self-stops the
+     * task to keep the scenario deterministic.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testNextResultCompletesInFinishOrderNotStartOrder(final AbstractTimedTaskExecutor executor)
+            throws Exception {
+        this.currentExecutor = executor;
+        AtomicInteger counter = new AtomicInteger(0);
+        FutureTimedTask<String> task = executor.<String>createFutureTask(self -> {
+            int n = counter.incrementAndGet();
+            if (n == 1) {
+                sleepUninterruptibly(400);
+                return "slow";
+            }
+            sleepUninterruptibly(20);
+            self.stop();
+            return "fast-" + n;
+        }).setPeriodicDelay(Duration.ofMillis(150)).build();
+
+        CompletableFuture<String> first = task.start();
+
+        assertEquals("fast-2", first.get(1, TimeUnit.SECONDS),
+                "Future from start() should be completed by the first execution to finish, not the first to start");
+
+        CompletableFuture<String> next = task.getNextResult();
+        assertEquals("slow", next.get(1, TimeUnit.SECONDS),
+                "Following future should still be completed by the slow execution once it finishes");
+    }
+
+    private static void sleepUninterruptibly(final long millis) {
+        try {
+            Thread.sleep(millis);
+        }
+        catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
      * Tests that start() returns null when the task is already running.
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
     void testStartOnAlreadyRunningTaskReturnsNull(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         CompletableFuture<Integer> first = task.start();
         assertNotNull(first, "First start() should return a non-null future");
@@ -218,8 +261,8 @@ class FutureTimedTaskTest {
     @MethodSource("executorProvider")
     void testInitialDelay(final AbstractTimedTaskExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 7).setInitialDelay(Duration.ofMillis(400)).build();
+        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 7)
+                .setInitialDelay(Duration.ofMillis(400)).build();
 
         CompletableFuture<Integer> future = task.start();
         assertFalse(future.isDone(), "Future should not be done immediately after start (initial delay)");
@@ -258,8 +301,8 @@ class FutureTimedTaskTest {
     @MethodSource("executorProvider")
     void testIsRunning(final AbstractTimedTaskExecutor executor) {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         assertFalse(task.isRunning(), "Task should not be running before start()");
         task.start();
@@ -377,5 +420,32 @@ class FutureTimedTaskTest {
 
         Boolean isRunning = task.start().get(1, TimeUnit.SECONDS);
         assertTrue(isRunning, "Task should report isRunning() == true during execution");
+    }
+
+    /**
+     * Tests the setMaxConcurrentExecutions() passthrough: builder validation
+     * rejects invalid values, and the instance method returns false while
+     * running. Future/result correctness under overlap is out of scope here.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testSetMaxConcurrentExecutionsPassthrough(final AbstractTimedTaskExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+
+        assertThrows(IllegalArgumentException.class,
+                () -> executor.createFutureTask(_ -> 1).setMaxConcurrentExecutions(0));
+        assertThrows(IllegalArgumentException.class,
+                () -> executor.createFutureTask(_ -> 1).setMaxConcurrentExecutions(-1));
+
+        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setPeriodicDelay(Duration.ofSeconds(10)).build();
+        task.start();
+        Thread.sleep(150);
+
+        assertFalse(task.setMaxConcurrentExecutions(2),
+                "setMaxConcurrentExecutions() should return false while the task is running");
+
+        task.stop();
     }
 }

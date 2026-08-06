@@ -142,6 +142,22 @@ TimedTask oneTime = executor.createTask(t -> doWork())
     .build();
 ```
 
+In periodic mode, if a task's execution takes longer than `periodicDelay`, the next
+firing is scheduled anyway - the previous execution and the new one can run
+concurrently. This overlap is **allowed by default** (unbounded). Use
+`setMaxConcurrentExecutions(n)` to cap how many executions of the same task may run
+at once; the timer thread blocks (without busy-waiting) until a slot frees up once
+the cap is reached. Setting `n = 1` reproduces fully-serialized behavior, equivalent
+to no overlap at all:
+
+```java
+// Allow at most 2 overlapping executions of a slow periodic task
+TimedTask bounded = executor.createTask(t -> doSlowWork())
+    .setPeriodicDelay(Duration.ofSeconds(1))
+    .setMaxConcurrentExecutions(2)
+    .build();
+```
+
 #### 3. Execution Model
 
 **ScheduledExecutorService**:
@@ -332,6 +348,7 @@ The `TimedTask` class is the central component representing an individual schedu
   - `initialDelay`: Delay before the first execution
   - `periodicDelay`: Fixed-rate interval between execution starts (scheduled at fixed intervals)
   - `repetitiveDelay`: Fixed-delay interval after execution completion
+  - `maxConcurrentExecutions`: Bounds concurrent overlap in periodic mode (default unbounded); see `setMaxConcurrentExecutions()`
 
 - **Internal Timer**: Contains a nested `Timer` class that manages the scheduling logic on a dedicated timer thread.
 
@@ -348,7 +365,7 @@ The `TimedTask` class is the central component representing an individual schedu
 The `TimedTaskBuilder` class implements the Builder pattern for fluent, type-safe task configuration. It:
 
 - **Enforces Required Parameters**: Mandates `Consumer<TimedTask>` task and `AbstractTimedTaskExecutor` at construction
-- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`)
+- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`, `setMaxConcurrentExecutions()`)
 - **Validates Configuration**: Ensures mutually exclusive execution modes (periodic vs. repetitive)
 - **Prevents Memory Leaks**: Creates defensive copies of all `Duration` and `String` parameters to decouple from external references
 - **Builds Immutable Tasks**: Constructs fully configured `TimedTask` instances via `build()`
@@ -414,23 +431,24 @@ The `AbstractTimedTaskExecutor` is an abstract base class that defines the execu
 
 `FutureTimedTask<T>` wraps a `TimedTask` and exposes each execution result as a `CompletableFuture<T>`.
 
-- **Result per Execution**: Each execution atomically captures the pending future, runs the task, and completes that future with the result or exception. A fresh future is installed before the next execution.
-- **Start Returns Future**: `start()` returns the `CompletableFuture<T>` for the first upcoming execution.
-- **Next Result Access**: `getNextResult()` returns the future for the upcoming execution at any point.
+- **Result per Execution**: Each execution runs the task first, then atomically claims whichever future is currently exposed and completes it with the result or exception, installing a fresh future for the following execution. Overlapping executions are published in completion order, not start order.
+- **Start Returns Future**: `start()` returns the `CompletableFuture<T>` for the next result to become available.
+- **Next Result Access**: `getNextResult()` returns the future that will be completed by whichever execution's result becomes available next (completion order), which may be an execution that was already in-flight when the method was called.
 - **Last Result Access**: `getLastResult()` returns an `Optional<T>` of the most recent successful result.
 - **Full Lifecycle**: `start()`, `stop()`, `isRunning()` delegate to the underlying `TimedTask`.
 - **Exception Propagation**: If the task throws, the future is completed exceptionally; the `lastResult` is not updated.
 
 **Key Design Decisions**:
 - `AtomicReference<CompletableFuture<T>>` ensures thread-safe future swapping with no races
-- `start()` is `synchronized` and installs a fresh future before starting the underlying task
+- The future is claimed and completed right after an execution's outcome is known, so whichever execution finishes first wins the race for the currently-exposed future
+- `start()` is `synchronized` and returns the currently-exposed future before starting the underlying task
 - Instances are created via `executor.createFutureTask(Function<FutureTimedTask<T>, T>)` and `FutureTimedTaskBuilder<T>.build()`
 
 #### 7. FutureTimedTaskBuilder\<T\>
 
 The `FutureTimedTaskBuilder<T>` class mirrors `TimedTaskBuilder` for `FutureTimedTask<T>`.
 
-- **Same fluent API**: `setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`
+- **Same fluent API**: `setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`, `setMaxConcurrentExecutions()`
 - **Builds `FutureTimedTask<T>`**: Constructs fully configured instances via `build()`
 - **Protected constructor**: Instantiated exclusively through `AbstractTimedTaskExecutor.createFutureTask(Function)`
 

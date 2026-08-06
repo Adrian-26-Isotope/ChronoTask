@@ -32,3 +32,5 @@ replay_pid*
 /.settings/
 .classpath
 .project
+mvn-jdk25.bat
+/.mvn

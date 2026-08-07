@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -11,7 +11,7 @@ import java.util.function.Consumer;
  * A timer with the ability to run a single task. This task can be schedules
  * periodically, repetitively or once with a initial delay.
  */
-public class TimedTask {
+public class ChronoTask {
 
     @SuppressWarnings("javadoc")
     protected enum State {
@@ -21,8 +21,8 @@ public class TimedTask {
     }
 
     /* mandatory fields */
-    private final Consumer<TimedTask> task;
-    private final AbstractTimedTaskExecutor executor;
+    private final Consumer<ChronoTask> task;
+    private final AbstractExecutor executor;
 
     /* optional fields */
     private volatile String name = "";
@@ -42,7 +42,7 @@ public class TimedTask {
     /**
      * @param task the task to be executed by this timer.
      */
-    protected TimedTask(final Consumer<TimedTask> task, final AbstractTimedTaskExecutor exec) {
+    protected ChronoTask(final Consumer<ChronoTask> task, final AbstractExecutor exec) {
         this.task = Objects.requireNonNull(task);
         this.executor = Objects.requireNonNull(exec);
     }
@@ -221,10 +221,10 @@ public class TimedTask {
                 // deliberately clear the interrupt state. in case of a pool thread, the thread can safely be reused.
                 Thread.interrupted();
 
-                synchronized (TimedTask.this) {
+                synchronized (ChronoTask.this) {
                     setState(State.STOPPED);
                     // notify potential waiting restart.
-                    TimedTask.this.notifyAll();
+                    ChronoTask.this.notifyAll();
                 }
             }
         }
@@ -234,7 +234,7 @@ public class TimedTask {
                 LocalDateTime next;
                 while (isAlive() && ((next = getNextExecution()) != null)) {
                     if (next.compareTo(LocalDateTime.now()) <= 0) {
-                        Semaphore throttle = TimedTask.this.executionThrottle;
+                        Semaphore throttle = ChronoTask.this.executionThrottle;
                         throttle.acquire();
                         calculatePeriodicExecutionTime(next);
                         executeTask(throttle);
@@ -254,7 +254,7 @@ public class TimedTask {
         private void executeTask(final Semaphore throttle) {
             Runnable task = () -> {
                 try {
-                    TimedTask.this.task.accept(TimedTask.this);
+                    ChronoTask.this.task.accept(ChronoTask.this);
                 }
                 catch (final Exception e) {
                     Thread current = Thread.currentThread();
@@ -266,12 +266,12 @@ public class TimedTask {
                 }
             };
 
-            if ((TimedTask.this.name == null) || TimedTask.this.name.isBlank()) {
-                TimedTask.this.executor.run(task);
+            if ((ChronoTask.this.name == null) || ChronoTask.this.name.isBlank()) {
+                ChronoTask.this.executor.run(task);
             }
             else {
-                String taskName = "[" + TimedTask.this.name + "]Task#" + (++TimedTask.this.count);
-                TimedTask.this.executor.run(task, taskName);
+                String taskName = "[" + ChronoTask.this.name + "]Task#" + (++ChronoTask.this.count);
+                ChronoTask.this.executor.run(task, taskName);
             }
 
         }
@@ -280,8 +280,8 @@ public class TimedTask {
          * only with periodic scenario: calculate the next execution time.
          */
         private void calculatePeriodicExecutionTime(final LocalDateTime currentExecutionTime) {
-            if (TimedTask.this.periodicDelay != null) {
-                setNextExecutionTime(currentExecutionTime.plus(TimedTask.this.periodicDelay));
+            if (ChronoTask.this.periodicDelay != null) {
+                setNextExecutionTime(currentExecutionTime.plus(ChronoTask.this.periodicDelay));
             }
             else {
                 // set next execution to null temporarily.
@@ -295,10 +295,10 @@ public class TimedTask {
          * only for repetitive scenario: set the next execution time.
          */
         private void calculateRepetitiveExecutionTime() {
-            if (TimedTask.this.repetitiveDelay != null) {
-                setNextExecutionTime(LocalDateTime.now().plus(TimedTask.this.repetitiveDelay));
+            if (ChronoTask.this.repetitiveDelay != null) {
+                setNextExecutionTime(LocalDateTime.now().plus(ChronoTask.this.repetitiveDelay));
             }
-            else if (TimedTask.this.periodicDelay == null) {
+            else if (ChronoTask.this.periodicDelay == null) {
                 // SINGLE TASK EXECUTION SCENARIO
                 stop(); // stop TimedTask!
             }
@@ -308,9 +308,9 @@ public class TimedTask {
             if (getNextExecution() == null) {
                 // REPETITIVE DELAY SCENARIO: wait till next execution time is set by the task
                 // thread.
-                synchronized (TimedTask.this.executionLock) {
+                synchronized (ChronoTask.this.executionLock) {
                     while (isAlive() && (getNextExecution() == null)) {
-                        TimedTask.this.executionLock.wait();
+                        ChronoTask.this.executionLock.wait();
                     }
                 }
             }

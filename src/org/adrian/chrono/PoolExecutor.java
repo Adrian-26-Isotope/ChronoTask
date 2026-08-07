@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 import java.util.List;
@@ -6,20 +6,20 @@ import java.util.Objects;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import adrian.os.java.threadpool.CustomThreadPool;
+import org.adrian.threadpool.ElasticThreadPool;
 
 
 /**
- * Implementation of {@link AbstractTimedTaskExecutor} that uses a thread pool
+ * Implementation of {@link AbstractExecutor} that uses a thread pool
  * to execute timed tasks.
  * <p>
- * This executor maintains a {@link CustomThreadPool} with configurable
+ * This executor maintains a {@link ElasticThreadPool} with configurable
  * settings. By default, it creates a pool with a minimum of 0 threads and an
  * idle time of 60 seconds, allowing threads to be created on demand and
  * released when idle.
  * </p>
  */
-public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
+public class PoolExecutor extends AbstractExecutor {
 
     private final String name;
     private final AbstractExecutorService threadPool;
@@ -28,32 +28,32 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
     /**
      * Constructs a new {@code TimedTaskPoolExecutor}.
      * <p>
-     * Initializes a {@link CustomThreadPool} with minimum threads set to 0 and an
+     * Initializes a {@link ElasticThreadPool} with minimum threads set to 0 and an
      * idle time of 60 seconds.
      * </p>
      */
-    public TimedTaskPoolExecutor() {
+    public PoolExecutor() {
         this.name = null;
-        this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).start();
+        this.threadPool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).start();
     }
 
     /**
      * Constructs a new {@code TimedTaskPoolExecutor} with the specified name.
      * <p>
-     * Initializes a {@link CustomThreadPool} with minimum threads set to 0 and an
+     * Initializes a {@link ElasticThreadPool} with minimum threads set to 0 and an
      * idle time of 60 seconds.
      * </p>
      *
      * @param name the name of this executor
      */
-    public TimedTaskPoolExecutor(final String name) {
+    public PoolExecutor(final String name) {
         this.name = name;
-        this.threadPool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name)
-                .start();
+        this.threadPool =
+                ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name).start();
     }
 
     /**
-     * Constructs a new {@link TimedTaskPoolExecutor} with a custom thread pool to
+     * Constructs a new {@link PoolExecutor} with a custom thread pool to
      * be used for executing tasks.
      * <p>
      * This allows replacing the default thread pool with a custom configured one.
@@ -61,7 +61,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      *
      * @param threadPool the executor service to use for task execution
      */
-    public TimedTaskPoolExecutor(final AbstractExecutorService threadPool) {
+    public PoolExecutor(final AbstractExecutorService threadPool) {
         this.name = null;
         this.threadPool = Objects.requireNonNull(threadPool);
     }
@@ -84,7 +84,7 @@ public class TimedTaskPoolExecutor extends AbstractTimedTaskExecutor {
      * </p>
      *
      * @param runnable the task to execute
-     * @param name     the name to assign to the thread during execution
+     * @param name the name to assign to the thread during execution
      */
     @Override
     protected void run(final Runnable runnable, final String name) {

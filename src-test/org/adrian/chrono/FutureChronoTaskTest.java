@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -15,21 +15,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.adrian.threadpool.ElasticThreadPool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import adrian.os.java.threadpool.CustomThreadPool;
+class FutureChronoTaskTest {
 
-class FutureTimedTaskTest {
-
-    private AbstractTimedTaskExecutor currentExecutor;
+    private AbstractExecutor currentExecutor;
 
     @AfterEach
     void cleanup() throws InterruptedException {
-        if (this.currentExecutor instanceof TimedTaskPoolExecutor poolExecutor) {
+        if (this.currentExecutor instanceof PoolExecutor poolExecutor) {
             poolExecutor.shutdown();
             assertTrue(poolExecutor.awaitTermination(Duration.ofMillis(2100)),
                     "idle time expired, pool should have been terminated");
@@ -40,9 +39,9 @@ class FutureTimedTaskTest {
      * Provides both executor implementations for parameterized tests.
      */
     static Stream<Arguments> executorProvider() {
-        return Stream.of(Arguments.of(new TimedTaskThreadExecutor()),
-                Arguments.of(new TimedTaskPoolExecutor(CustomThreadPool.builder().setMinThreads(0)
-                        .setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
+        return Stream.of(Arguments.of(new ThreadExecutor()), Arguments.of(new PoolExecutor(ElasticThreadPool.builder()
+                .setMinThreads(0).setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
+
     }
 
     /**
@@ -51,9 +50,9 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testOneShotResult(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testOneShotResult(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 42).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 42).build();
 
         CompletableFuture<Integer> future = task.start();
         assertNotNull(future, "start() should return a non-null future");
@@ -68,9 +67,9 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testLastResultBeforeAndAfterExecution(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testLastResultBeforeAndAfterExecution(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<String> task = executor.<String>createFutureTask(_ -> "hello").build();
+        FutureChronoTask<String> task = executor.<String>createFutureTask(_ -> "hello").build();
 
         assertTrue(task.getLastResult().isEmpty(), "getLastResult() should be empty before first execution");
 
@@ -87,10 +86,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testCallableExceptionPropagates(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testCallableExceptionPropagates(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         RuntimeException cause = new RuntimeException("callable failed");
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> {
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> {
             throw cause;
         }).build();
 
@@ -109,9 +108,9 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testLastResultEmptyOnException(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testLastResultEmptyOnException(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> {
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> {
             throw new RuntimeException("error");
         }).build();
 
@@ -128,10 +127,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicCallable(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testPeriodicCallable(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> counter.incrementAndGet())
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> counter.incrementAndGet())
                 .setPeriodicDelay(Duration.ofMillis(200)).build();
 
         CompletableFuture<Integer> first = task.start();
@@ -152,11 +151,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNextResultCompletesInFinishOrderNotStartOrder(final AbstractTimedTaskExecutor executor)
-            throws Exception {
+    void testNextResultCompletesInFinishOrderNotStartOrder(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureTimedTask<String> task = executor.<String>createFutureTask(self -> {
+        FutureChronoTask<String> task = executor.<String>createFutureTask(self -> {
             int n = counter.incrementAndGet();
             if (n == 1) {
                 sleepUninterruptibly(400);
@@ -191,10 +189,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStartOnAlreadyRunningTaskReturnsNull(final AbstractTimedTaskExecutor executor) {
+    void testStartOnAlreadyRunningTaskReturnsNull(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
-                .setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureChronoTask<Integer> task =
+                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         CompletableFuture<Integer> first = task.start();
         assertNotNull(first, "First start() should return a non-null future");
@@ -211,9 +209,9 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopAndRestart(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testStopAndRestart(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 99).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 99).build();
 
         CompletableFuture<Integer> first = task.start();
         assertEquals(99, first.get(1, TimeUnit.SECONDS));
@@ -231,24 +229,24 @@ class FutureTimedTaskTest {
     }
 
     /**
-     * Tests that the callable task works correctly with TimedTaskThreadExecutor.
+     * Tests that the callable task works correctly with ThreadExecutor.
      */
     @Test
     void testWithThreadExecutor() throws Exception {
-        this.currentExecutor = new TimedTaskThreadExecutor();
-        FutureTimedTask<String> task = this.currentExecutor.<String>createFutureTask(_ -> "thread-result").build();
+        this.currentExecutor = new ThreadExecutor();
+        FutureChronoTask<String> task = this.currentExecutor.<String>createFutureTask(_ -> "thread-result").build();
 
         String result = task.start().get(1, TimeUnit.SECONDS);
         assertEquals("thread-result", result);
     }
 
     /**
-     * Tests that the callable task works correctly with TimedTaskPoolExecutor.
+     * Tests that the callable task works correctly with PoolExecutor.
      */
     @Test
     void testWithPoolExecutor() throws Exception {
-        TimedTaskPoolExecutor poolExecutor = new TimedTaskPoolExecutor("callable-pool");
-        FutureTimedTask<String> task = poolExecutor.<String>createFutureTask(_ -> "pool-result").build();
+        PoolExecutor poolExecutor = new PoolExecutor("callable-pool");
+        FutureChronoTask<String> task = poolExecutor.<String>createFutureTask(_ -> "pool-result").build();
         String result = task.start().get(1, TimeUnit.SECONDS);
         assertEquals("pool-result", result);
         poolExecutor.shutdown();
@@ -259,10 +257,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testInitialDelay(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testInitialDelay(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 7)
-                .setInitialDelay(Duration.ofMillis(400)).build();
+        FutureChronoTask<Integer> task =
+                executor.<Integer>createFutureTask(_ -> 7).setInitialDelay(Duration.ofMillis(400)).build();
 
         CompletableFuture<Integer> future = task.start();
         assertFalse(future.isDone(), "Future should not be done immediately after start (initial delay)");
@@ -279,10 +277,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveCallable(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testRepetitiveCallable(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> counter.incrementAndGet())
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> counter.incrementAndGet())
                 .setRepetitiveDelay(Duration.ofMillis(200)).build();
 
         CompletableFuture<Integer> first = task.start();
@@ -299,10 +297,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testIsRunning(final AbstractTimedTaskExecutor executor) {
+    void testIsRunning(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
-                .setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureChronoTask<Integer> task =
+                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         assertFalse(task.isRunning(), "Task should not be running before start()");
         task.start();
@@ -317,10 +315,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testGetNextResultBeforeFirstExecution(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testGetNextResultBeforeFirstExecution(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         // Long delay: won't execute during test
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 5)
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 5)
                 .setInitialDelay(Duration.ofSeconds(10)).setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         CompletableFuture<Integer> fromStart = task.start();
@@ -339,10 +337,10 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMultipleRestarts(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testMultipleRestarts(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> counter.incrementAndGet()).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> counter.incrementAndGet()).build();
 
         for (int i = 1; i <= 3; i++) {
             CompletableFuture<Integer> future = task.start();
@@ -356,7 +354,7 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativeInitialDelayThrows(final AbstractTimedTaskExecutor executor) {
+    void testNegativeInitialDelayThrows(final AbstractExecutor executor) {
         this.currentExecutor = executor;
         assertThrows(IllegalArgumentException.class,
                 () -> executor.createFutureTask(_ -> 1).setInitialDelay(Duration.ofMillis(-100)));
@@ -367,7 +365,7 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativePeriodicDelayThrows(final AbstractTimedTaskExecutor executor) {
+    void testNegativePeriodicDelayThrows(final AbstractExecutor executor) {
         this.currentExecutor = executor;
         assertThrows(IllegalArgumentException.class,
                 () -> executor.createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofMillis(-100)));
@@ -378,7 +376,7 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativeRepetitiveDelayThrows(final AbstractTimedTaskExecutor executor) {
+    void testNegativeRepetitiveDelayThrows(final AbstractExecutor executor) {
         this.currentExecutor = executor;
         assertThrows(IllegalArgumentException.class,
                 () -> executor.createFutureTask(_ -> 1).setRepetitiveDelay(Duration.ofMillis(-100)));
@@ -390,11 +388,11 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testSelfTermination(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testSelfTermination(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         int limit = 3;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(self -> {
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(self -> {
             int n = counter.incrementAndGet();
             if (n >= limit) {
                 self.stop();
@@ -414,9 +412,9 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testIsRunningInsideCallable(final AbstractTimedTaskExecutor executor) throws Exception {
+    void testIsRunningInsideCallable(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureTimedTask<Boolean> task = executor.<Boolean>createFutureTask(self -> self.isRunning()).build();
+        FutureChronoTask<Boolean> task = executor.<Boolean>createFutureTask(self -> self.isRunning()).build();
 
         Boolean isRunning = task.start().get(1, TimeUnit.SECONDS);
         assertTrue(isRunning, "Task should report isRunning() == true during execution");
@@ -429,8 +427,7 @@ class FutureTimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testSetMaxConcurrentExecutionsPassthrough(final AbstractTimedTaskExecutor executor)
-            throws InterruptedException {
+    void testSetMaxConcurrentExecutionsPassthrough(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         assertThrows(IllegalArgumentException.class,
@@ -438,8 +435,8 @@ class FutureTimedTaskTest {
         assertThrows(IllegalArgumentException.class,
                 () -> executor.createFutureTask(_ -> 1).setMaxConcurrentExecutions(-1));
 
-        FutureTimedTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
-                .setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureChronoTask<Integer> task =
+                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
         task.start();
         Thread.sleep(150);
 

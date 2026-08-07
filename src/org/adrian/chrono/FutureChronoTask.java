@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -18,14 +18,14 @@ import java.util.function.Function;
  * not the order they started.
  * </p>
  * <p>
- * Instances are created via {@link AbstractTimedTaskExecutor#createFutureTask(Function)}.
+ * Instances are created via {@link AbstractExecutor#createFutureTask(Function)}.
  * </p>
  *
  * @param <T> the type of the result produced by the task.
  */
-public class FutureTimedTask<T> {
+public class FutureChronoTask<T> {
 
-    private final TimedTask timedTask;
+    private final ChronoTask chronoTask;
     private final AtomicReference<CompletableFuture<T>> nextResult;
     private volatile T lastResult;
 
@@ -34,15 +34,15 @@ public class FutureTimedTask<T> {
      *            instance as argument.
      * @param executor the executor that runs the underlying timer and task threads.
      */
-    FutureTimedTask(final Function<FutureTimedTask<T>, T> task, final AbstractTimedTaskExecutor executor) {
+    FutureChronoTask(final Function<FutureChronoTask<T>, T> task, final AbstractExecutor executor) {
         Objects.requireNonNull(task);
         this.nextResult = new AtomicReference<>(new CompletableFuture<>());
 
-        Consumer<TimedTask> consumer = _ -> {
+        Consumer<ChronoTask> consumer = _ -> {
             T result = null;
             Exception failure = null;
             try {
-                result = task.apply(FutureTimedTask.this);
+                result = task.apply(FutureChronoTask.this);
             }
             catch (final Exception e) {
                 failure = e;
@@ -57,7 +57,7 @@ public class FutureTimedTask<T> {
             }
         };
 
-        this.timedTask = executor.createTask(consumer).build();
+        this.chronoTask = executor.createTask(consumer).build();
     }
 
     /**
@@ -75,7 +75,7 @@ public class FutureTimedTask<T> {
             return null;
         }
         CompletableFuture<T> next = getNextResult();
-        boolean started = this.timedTask.start();
+        boolean started = this.chronoTask.start();
         return started ? next : null;
     }
 
@@ -84,7 +84,7 @@ public class FutureTimedTask<T> {
      * stopped the task can be started again via {@link #start()}.
      */
     public void stop() {
-        this.timedTask.stop();
+        this.chronoTask.stop();
     }
 
     /**
@@ -92,7 +92,7 @@ public class FutureTimedTask<T> {
      *         otherwise
      */
     public boolean isRunning() {
-        return this.timedTask.isRunning();
+        return this.chronoTask.isRunning();
     }
 
     /**
@@ -131,7 +131,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     protected boolean setInitialDelay(final Duration delay) {
-        return this.timedTask.setInitialDelay(delay);
+        return this.chronoTask.setInitialDelay(delay);
     }
 
     /**
@@ -142,7 +142,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     protected boolean setPeriodicDelay(final Duration delay) {
-        return this.timedTask.setPeriodicDelay(delay);
+        return this.chronoTask.setPeriodicDelay(delay);
     }
 
     /**
@@ -153,7 +153,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     protected boolean setRepetitiveDelay(final Duration delay) {
-        return this.timedTask.setRepetitiveDelay(delay);
+        return this.chronoTask.setRepetitiveDelay(delay);
     }
 
     /**
@@ -161,7 +161,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     protected boolean setName(final String name) {
-        return this.timedTask.setName(name);
+        return this.chronoTask.setName(name);
     }
 
     /**
@@ -173,6 +173,6 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     protected boolean setMaxConcurrentExecutions(final int max) {
-        return this.timedTask.setMaxConcurrentExecutions(max);
+        return this.chronoTask.setMaxConcurrentExecutions(max);
     }
 }

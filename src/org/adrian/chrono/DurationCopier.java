@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 
@@ -11,8 +11,7 @@ import java.time.Duration;
  */
 final class DurationCopier {
 
-    private DurationCopier() {
-    }
+    private DurationCopier() {}
 
     /**
      * Creates a new {@link Duration} instance equal in value to the given

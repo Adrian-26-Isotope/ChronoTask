@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import org.adrian.chrono.ChronoTask.State;
+import org.adrian.threadpool.ElasticThreadPool;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,13 +23,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import adrian.os.java.threadpool.CustomThreadPool;
-import adrian.os.java.timer.TimedTask.State;
-
-class TimedTaskTest {
+class ChronoTaskTest {
 
     private final AtomicLong counter = new AtomicLong(0);
-    private AbstractTimedTaskExecutor currentExecutor;
+    private AbstractExecutor currentExecutor;
 
     @BeforeEach
     void setup() {
@@ -37,7 +36,7 @@ class TimedTaskTest {
     @AfterEach
     void cleanup() throws InterruptedException {
         // Cleanup pool executor if it was used
-        if (this.currentExecutor instanceof TimedTaskPoolExecutor poolExecutor) {
+        if (this.currentExecutor instanceof PoolExecutor poolExecutor) {
             poolExecutor.shutdown();
             assertTrue(poolExecutor.awaitTermination(Duration.ofMillis(2100)),
                     "idle time expired, pool should have been terminated");
@@ -48,29 +47,28 @@ class TimedTaskTest {
      * Provides both executor implementations for parameterized tests.
      */
     static Stream<Arguments> executorProvider() {
-        return Stream.of(Arguments.of(new TimedTaskThreadExecutor()),
-                Arguments.of(new TimedTaskPoolExecutor(CustomThreadPool.builder().setMinThreads(0)
-                        .setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
+        return Stream.of(Arguments.of(new ThreadExecutor()), Arguments.of(new PoolExecutor(ElasticThreadPool.builder()
+                .setMinThreads(0).setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
     }
 
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testState(final AbstractTimedTaskExecutor executor) {
+    void testState(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
-        timedTask.start();
-        assertEquals(State.RUNNING, timedTask.getState());
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        var ChronoTask = executor.createTask(createTask(1)).build();
+        ChronoTask.start();
+        assertEquals(State.RUNNING, ChronoTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
     }
 
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitive(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitive(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setPeriodicDelay(Duration.ofSeconds(10)).setRepetitiveDelay(Duration.ofSeconds(2));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Increased buffer for thread startup
         assertEquals(1, this.counter.get());
@@ -83,11 +81,11 @@ class TimedTaskTest {
 
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodic(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodic(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = this.currentExecutor.createTask(createTask(1));
+        ChronoTaskBuilder builder = this.currentExecutor.createTask(createTask(1));
         builder.setRepetitiveDelay(Duration.ofSeconds(10)).setPeriodicDelay(Duration.ofSeconds(1));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Increased buffer for thread startup
         assertEquals(1, this.counter.get());
@@ -99,10 +97,10 @@ class TimedTaskTest {
 
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testDelayed1(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testDelayed1(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = this.currentExecutor.createTask(createTask(1));
-        TimedTask timer = builder.build();
+        ChronoTaskBuilder builder = this.currentExecutor.createTask(createTask(1));
+        ChronoTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Increased buffer for thread startup
         assertEquals(1, this.counter.get());
@@ -113,11 +111,11 @@ class TimedTaskTest {
 
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testDelayed2(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testDelayed2(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ofSeconds(1));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
         timer.start();
         Thread.sleep(150); // Buffer for thread startup
         assertEquals(0, this.counter.get());
@@ -133,10 +131,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStateAfterBuild(final AbstractTimedTaskExecutor executor) {
+    void testStateAfterBuild(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
-        assertEquals(State.STOPPED, timedTask.getState());
+        var ChronoTask = executor.createTask(createTask(1)).build();
+        assertEquals(State.STOPPED, ChronoTask.getState());
     }
 
     /**
@@ -144,19 +142,19 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testDoubleStart(final AbstractTimedTaskExecutor executor) {
+    void testDoubleStart(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
         // First start should succeed
-        assertTrue(timedTask.start());
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
         // Second start should fail (already running)
-        assertFalse(timedTask.start());
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertFalse(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -164,13 +162,13 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopBeforeStart(final AbstractTimedTaskExecutor executor) {
+    void testStopBeforeStart(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
-        assertEquals(State.STOPPED, timedTask.getState());
-        timedTask.stop(); // Should be no-op
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
+        ChronoTask.stop(); // Should be no-op
+        assertEquals(State.STOPPED, ChronoTask.getState());
     }
 
     /**
@@ -178,24 +176,24 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMultipleStops(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testMultipleStops(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
-        timedTask.start();
-        assertEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.start();
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
 
-        timedTask.stop(); // Second stop should be safe
-        assertNotEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.stop(); // Second stop should be safe
+        assertNotEquals(State.RUNNING, ChronoTask.getState());
 
-        timedTask.stop(); // Third stop should be safe
-        assertNotEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.stop(); // Third stop should be safe
+        assertNotEquals(State.RUNNING, ChronoTask.getState());
 
         Thread.sleep(Duration.ofMillis(100));
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
     }
 
     /**
@@ -203,12 +201,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStateAfterCompletion(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testStateAfterCompletion(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
-        timedTask.start();
-        assertEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.start();
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
         // Wait for task to execute and complete
         Thread.sleep(100); // Start execution
@@ -217,7 +215,7 @@ class TimedTaskTest {
         Thread.sleep(1100); // Wait for task duration (1 second)
 
         // Task should have completed and state should be NOT_RUNNING
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
         assertEquals(1, this.counter.get());
     }
 
@@ -226,31 +224,31 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRestart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRestart(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setPeriodicDelay(Duration.ofSeconds(2));
-        TimedTask timedTask = builder.build();
+        ChronoTask ChronoTask = builder.build();
 
         // First start
-        assertTrue(timedTask.start());
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(150); // Allow task to execute
         assertEquals(1, this.counter.get());
 
         // Stop the task
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
         Thread.sleep(100);
         long countAfterStop = this.counter.get();
 
         // Restart the task
-        assertTrue(timedTask.start());
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(150); // Allow task to execute
         assertTrue(this.counter.get() > countAfterStop, "Counter should increment after restart");
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -258,18 +256,18 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMultipleRestarts(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testMultipleRestarts(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build(); // single execution task
+        var ChronoTask = executor.createTask(createTask(1)).build(); // single execution task
 
         for (int i = 1; i <= 3; i++) {
             // Start the task
-            assertTrue(timedTask.start(), "Start should succeed on iteration " + i);
-            assertEquals(State.RUNNING, timedTask.getState());
+            assertTrue(ChronoTask.start(), "Start should succeed on iteration " + i);
+            assertEquals(State.RUNNING, ChronoTask.getState());
             Thread.sleep(150); // Allow task to execute
             assertEquals(i, this.counter.get(), "Counter should be " + i + " on iteration " + i);
             Thread.sleep(1000); // Wait for task to complete
-            assertEquals(State.STOPPED, timedTask.getState());
+            assertEquals(State.STOPPED, ChronoTask.getState());
         }
     }
 
@@ -279,31 +277,31 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRestartWithSameConfiguration(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRestartWithSameConfiguration(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ofMillis(500));
-        TimedTask timedTask = builder.build();
+        ChronoTask ChronoTask = builder.build();
 
         // First start - verify initial delay
-        timedTask.start();
+        ChronoTask.start();
         Thread.sleep(200);
         assertEquals(0, this.counter.get(), "Task should not execute yet (initial delay)");
         Thread.sleep(400);
         assertEquals(1, this.counter.get(), "Task should execute after initial delay");
         Thread.sleep(1100); // Wait for completion
-        timedTask.stop();
+        ChronoTask.stop();
 
         Thread.sleep(500);
 
         // Restart - verify initial delay is still applied
         this.counter.set(0);
-        timedTask.start();
+        ChronoTask.start();
         Thread.sleep(200);
         assertEquals(0, this.counter.get(), "Task should not execute yet on restart (initial delay)");
         Thread.sleep(400);
         assertEquals(1, this.counter.get(), "Task should execute after initial delay on restart");
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -312,11 +310,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testDelayedZeroInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testDelayedZeroInitialDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ZERO);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Buffer for thread startup
@@ -332,11 +330,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicMultipleCycles(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicMultipleCycles(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setPeriodicDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(100); // small buffer
@@ -357,11 +355,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicStopDuringExecution(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicStopDuringExecution(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
+        ChronoTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
         builder.setPeriodicDelay(Duration.ofMillis(500));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Allow execution to start
@@ -383,11 +381,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicWithInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicWithInitialDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setInitialDelay(Duration.ofMillis(800)).setPeriodicDelay(Duration.ofMillis(500));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(400); // Half of initial delay
@@ -408,11 +406,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicShortDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicShortDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setPeriodicDelay(Duration.ofMillis(100));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // Allow first execution
@@ -432,11 +430,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicLongRunningTask(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicLongRunningTask(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1)); // 1-second task
+        ChronoTaskBuilder builder = executor.createTask(createTask(1)); // 1-second task
         builder.setPeriodicDelay(Duration.ofMillis(300)); // Shorter than task duration
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Allow first execution to start
@@ -457,11 +455,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveMultipleCycles(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveMultipleCycles(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setRepetitiveDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(100); // Small buffer for first execution
@@ -482,11 +480,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveStopDuringExecution(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveStopDuringExecution(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
+        ChronoTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
         builder.setRepetitiveDelay(Duration.ofMillis(500));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Allow execution to start
@@ -508,11 +506,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveWithInitialDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveWithInitialDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setInitialDelay(Duration.ofMillis(800)).setRepetitiveDelay(Duration.ofMillis(300));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(400); // Half of initial delay
@@ -533,11 +531,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveShortDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveShortDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
         builder.setRepetitiveDelay(Duration.ofMillis(100));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // Allow first execution
@@ -558,24 +556,25 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveVariableTaskDuration(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveVariableTaskDuration(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         // Create a task with variable duration based on execution count
-        Consumer<TimedTask> variableTask = _ -> {
+        Consumer<ChronoTask> variableTask = _ -> {
             try {
                 long count = this.counter.incrementAndGet();
                 // First execution: 100ms, second: 300ms, third: 100ms
                 long sleepTime = (count == 2) ? 300 : 100;
                 Thread.sleep(sleepTime);
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
 
-        TimedTaskBuilder builder = executor.createTask(variableTask);
+        ChronoTaskBuilder builder = executor.createTask(variableTask);
         builder.setRepetitiveDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // Allow first execution to start
@@ -599,18 +598,18 @@ class TimedTaskTest {
      */
     @Test
     void testNamedTask() throws InterruptedException {
-        this.currentExecutor = new TimedTaskThreadExecutor();
+        this.currentExecutor = new ThreadExecutor();
 
         // Create a task that captures the thread name
         final String[] capturedThreadName = { null };
-        Consumer<TimedTask> namedTask = _ -> {
+        Consumer<ChronoTask> namedTask = _ -> {
             capturedThreadName[0] = Thread.currentThread().getName();
             this.counter.incrementAndGet();
         };
 
-        TimedTaskBuilder builder = this.currentExecutor.createTask(namedTask);
+        ChronoTaskBuilder builder = this.currentExecutor.createTask(namedTask);
         builder.setName("TestTask");
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Allow task to execute
@@ -634,16 +633,16 @@ class TimedTaskTest {
      */
     @Test
     void testNamedTaskWithPoolExecutorThreadNames() throws InterruptedException {
-        TimedTaskPoolExecutor poolExecutor = new TimedTaskPoolExecutor("TestPool");
+        PoolExecutor poolExecutor = new PoolExecutor("TestPool");
 
         // Create a task that captures the thread name
         final String[] capturedThreadName = { null };
-        Consumer<TimedTask> namedTask = _ -> {
+        Consumer<ChronoTask> namedTask = _ -> {
             capturedThreadName[0] = Thread.currentThread().getName();
             this.counter.incrementAndGet();
         };
 
-        TimedTask timer = poolExecutor.createTask(namedTask).setName("DatabaseSync").build();
+        ChronoTask timer = poolExecutor.createTask(namedTask).setName("DatabaseSync").build();
 
         timer.start();
         Thread.sleep(150); // Allow task to execute
@@ -661,12 +660,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNamedTaskWithBlankName(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testNamedTaskWithBlankName(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setName("   "); // Blank name
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // Allow task to execute
@@ -681,9 +680,9 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNamedTaskWithNullName(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testNamedTaskWithNullName(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         assertThrowsExactly(NullPointerException.class, () -> builder.setName(null));
     }
 
@@ -693,20 +692,20 @@ class TimedTaskTest {
      */
     @Test
     void testNamedPeriodicTask() throws InterruptedException {
-        this.currentExecutor = new TimedTaskThreadExecutor();
+        this.currentExecutor = new ThreadExecutor();
 
         // Create a task that captures thread names
         final List<String> capturedThreadNames = new java.util.ArrayList<>();
-        Consumer<TimedTask> namedTask = _ -> {
+        Consumer<ChronoTask> namedTask = _ -> {
             synchronized (capturedThreadNames) {
                 capturedThreadNames.add(Thread.currentThread().getName());
             }
             this.counter.incrementAndGet();
         };
 
-        TimedTaskBuilder builder = this.currentExecutor.createTask(namedTask);
+        ChronoTaskBuilder builder = this.currentExecutor.createTask(namedTask);
         builder.setName("PeriodicTask").setPeriodicDelay(Duration.ofMillis(300));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // First execution
@@ -736,7 +735,7 @@ class TimedTaskTest {
      */
     @Test
     void testMultipleNamedTasks() throws InterruptedException {
-        this.currentExecutor = new TimedTaskThreadExecutor();
+        this.currentExecutor = new ThreadExecutor();
 
         final AtomicLong counter1 = new AtomicLong(0);
         final AtomicLong counter2 = new AtomicLong(0);
@@ -744,24 +743,24 @@ class TimedTaskTest {
         final String[] threadName2 = { null };
 
         // First task
-        Consumer<TimedTask> task1 = _ -> {
+        Consumer<ChronoTask> task1 = _ -> {
             threadName1[0] = Thread.currentThread().getName();
             counter1.incrementAndGet();
         };
 
-        TimedTaskBuilder builder1 = this.currentExecutor.createTask(task1);
+        ChronoTaskBuilder builder1 = this.currentExecutor.createTask(task1);
         builder1.setName("Task1");
-        TimedTask timer1 = builder1.build();
+        ChronoTask timer1 = builder1.build();
 
         // Second task
-        Consumer<TimedTask> task2 = _ -> {
+        Consumer<ChronoTask> task2 = _ -> {
             threadName2[0] = Thread.currentThread().getName();
             counter2.incrementAndGet();
         };
 
-        TimedTaskBuilder builder2 = this.currentExecutor.createTask(task2);
+        ChronoTaskBuilder builder2 = this.currentExecutor.createTask(task2);
         builder2.setName("Task2");
-        TimedTask timer2 = builder2.build();
+        ChronoTask timer2 = builder2.build();
 
         // Start both tasks
         timer1.start();
@@ -787,21 +786,21 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testInitialDelayPrecision(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testInitialDelayPrecision(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final long startTime = System.currentTimeMillis();
         final long[] actualExecutionTime = { 0 };
 
-        Consumer<TimedTask> timedTask = _ -> {
+        Consumer<ChronoTask> ChronoTask = _ -> {
             actualExecutionTime[0] = System.currentTimeMillis();
             this.counter.incrementAndGet();
         };
 
-        TimedTaskBuilder builder = executor.createTask(timedTask);
+        ChronoTaskBuilder builder = executor.createTask(ChronoTask);
         Duration initialDelay = Duration.ofMillis(357);
         builder.setInitialDelay(initialDelay);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(450); // Wait for execution to complete
@@ -826,23 +825,23 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicDelayPrecision(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicDelayPrecision(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final long startTime = System.currentTimeMillis();
         final List<Long> executionTimes = new java.util.ArrayList<>();
 
-        Consumer<TimedTask> timedTask = _ -> {
+        Consumer<ChronoTask> ChronoTask = _ -> {
             synchronized (executionTimes) {
                 executionTimes.add(System.currentTimeMillis() - startTime);
                 this.counter.incrementAndGet();
             }
         };
 
-        TimedTaskBuilder builder = executor.createTask(timedTask);
+        ChronoTaskBuilder builder = executor.createTask(ChronoTask);
         Duration periodicDelay = Duration.ofMillis(300);
         builder.setPeriodicDelay(periodicDelay);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(1000); // Allow for ~3 executions
@@ -869,21 +868,22 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveDelayPrecision(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveDelayPrecision(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final List<Long> executionStartTimes = new java.util.ArrayList<>();
         final List<Long> executionEndTimes = new java.util.ArrayList<>();
         final Duration taskDuration = Duration.ofMillis(200);
 
-        Consumer<TimedTask> timedTask = _ -> {
+        Consumer<ChronoTask> ChronoTask = _ -> {
             synchronized (executionStartTimes) {
                 executionStartTimes.add(System.currentTimeMillis());
             }
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(taskDuration);
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             synchronized (executionEndTimes) {
@@ -891,10 +891,10 @@ class TimedTaskTest {
             }
         };
 
-        TimedTaskBuilder builder = executor.createTask(timedTask);
+        ChronoTaskBuilder builder = executor.createTask(ChronoTask);
         Duration repetitiveDelay = Duration.ofMillis(300);
         builder.setRepetitiveDelay(repetitiveDelay);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(1500); // Allow for ~3 executions (200ms task + 300ms delay = 500ms per cycle)
@@ -923,16 +923,16 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNextExecutionTime(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testNextExecutionTime(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final long startTime = System.currentTimeMillis();
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         Duration initialDelay = Duration.ofMillis(500);
         Duration periodicDelay = Duration.ofMillis(300);
         builder.setInitialDelay(initialDelay).setPeriodicDelay(periodicDelay);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         // Before start, state should be NOT_RUNNING
         assertEquals(State.STOPPED, timer.getState());
@@ -963,12 +963,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskThrowsException(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskThrowsException(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         // Create a task that throws an exception on first execution, then works
         // normally
-        Consumer<TimedTask> exceptionTask = _ -> {
+        Consumer<ChronoTask> exceptionTask = _ -> {
             long count = this.counter.incrementAndGet();
             if (count == 1) {
                 throw new RuntimeException("Test exception on first execution");
@@ -976,9 +976,9 @@ class TimedTaskTest {
             // Subsequent executions work normally
         };
 
-        TimedTaskBuilder builder = executor.createTask(exceptionTask);
+        ChronoTaskBuilder builder = executor.createTask(exceptionTask);
         builder.setPeriodicDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // First execution (throws exception)
@@ -1000,17 +1000,17 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskThrowsRuntimeException(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskThrowsRuntimeException(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<TimedTask> exceptionTask = _ -> {
+        Consumer<ChronoTask> exceptionTask = _ -> {
             this.counter.incrementAndGet();
             throw new IllegalStateException("Test runtime exception");
         };
 
-        TimedTaskBuilder builder = executor.createTask(exceptionTask);
+        ChronoTaskBuilder builder = executor.createTask(exceptionTask);
         builder.setRepetitiveDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // First execution
@@ -1029,22 +1029,23 @@ class TimedTaskTest {
      */
     @Test
     void testTaskInterrupted() throws InterruptedException {
-        var executor = new TimedTaskPoolExecutor("TaskInterruptor");
+        var executor = new PoolExecutor("TaskInterruptor");
         this.currentExecutor = executor;
 
         final boolean[] interruptHandled = { false };
 
-        Consumer<TimedTask> interruptibleTask = _ -> {
+        Consumer<ChronoTask> interruptibleTask = _ -> {
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(Duration.ofSeconds(5)); // Long sleep to be interrupted
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 interruptHandled[0] = true;
                 Thread.currentThread().interrupt(); // Restore interrupt status
             }
         };
 
-        TimedTask timer = executor.createTask(interruptibleTask).build();
+        ChronoTask timer = executor.createTask(interruptibleTask).build();
 
         timer.start();
         Thread.sleep(50); // Allow task to start
@@ -1065,17 +1066,19 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNullTask(final AbstractTimedTaskExecutor executor) {
+    void testNullTask(final AbstractExecutor executor) {
         this.currentExecutor = executor;
 
         // Attempt to create a task with null
         try {
-            TimedTask timer = executor.createTask(null).build();
+            ChronoTask timer = executor.createTask(null).build();
             timer.start();
-        } catch (NullPointerException _) {
+        }
+        catch (NullPointerException _) {
             // This is expected behavior - null task not allowed
             assertTrue(true, "NullPointerException expected for null task");
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             // Some other exception is also acceptable
             assertTrue(true, "Exception expected for null task: " + e.getClass().getSimpleName());
         }
@@ -1088,15 +1091,16 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativeInitialDelay(final AbstractTimedTaskExecutor executor) {
+    void testNegativeInitialDelay(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
 
         // Attempt to set negative initial delay should throw exception
         try {
             builder.setInitialDelay(Duration.ofMillis(-500));
             fail("Expected IllegalArgumentException for negative initial delay");
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("negative"),
                     "Exception message should mention 'negative': " + e.getMessage());
         }
@@ -1109,15 +1113,16 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativePeriodicDelay(final AbstractTimedTaskExecutor executor) {
+    void testNegativePeriodicDelay(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
 
         // Attempt to set negative periodic delay should throw exception
         try {
             builder.setPeriodicDelay(Duration.ofMillis(-300));
             fail("Expected IllegalArgumentException for negative periodic delay");
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("negative"),
                     "Exception message should mention 'negative': " + e.getMessage());
         }
@@ -1130,15 +1135,16 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testNegativeRepetitiveDelay(final AbstractTimedTaskExecutor executor) {
+    void testNegativeRepetitiveDelay(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
 
         // Attempt to set negative repetitive delay should throw exception
         try {
             builder.setRepetitiveDelay(Duration.ofMillis(-300));
             fail("Expected IllegalArgumentException for negative repetitive delay");
-        } catch (IllegalArgumentException e) {
+        }
+        catch (IllegalArgumentException e) {
             assertTrue(e.getMessage().contains("negative"),
                     "Exception message should mention 'negative': " + e.getMessage());
         }
@@ -1151,12 +1157,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testExtremelyLongDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testExtremelyLongDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setInitialDelay(Duration.ofDays(365));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         assertEquals(State.RUNNING, timer.getState(), "Timer should be running");
@@ -1172,23 +1178,23 @@ class TimedTaskTest {
     }
 
     /**
-     * Tests that a task can stop itself by calling timedTask.stop().
+     * Tests that a task can stop itself by calling ChronoTask.stop().
      * The task receives a reference to its timer and can control its own execution.
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskStopsItself(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskStopsItself(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<TimedTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             this.counter.incrementAndGet();
             // Task stops itself after first execution
-            timedTask.stop();
+            ChronoTask.stop();
         };
 
-        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
+        ChronoTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setPeriodicDelay(Duration.ofMillis(300));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50);
@@ -1204,20 +1210,20 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskStopsItselfInPeriodicMode(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskStopsItselfInPeriodicMode(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final int stopAfter = 3;
-        Consumer<TimedTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             long count = this.counter.incrementAndGet();
             if (count >= stopAfter) {
-                timedTask.stop();
+                ChronoTask.stop();
             }
         };
 
-        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
+        ChronoTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setPeriodicDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // First execution
@@ -1239,20 +1245,20 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskStopsItselfInRepetitiveMode(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskStopsItselfInRepetitiveMode(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final int stopAfter = 3;
-        Consumer<TimedTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             long count = this.counter.incrementAndGet();
             if (count >= stopAfter) {
-                timedTask.stop();
+                ChronoTask.stop();
             }
         };
 
-        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
+        ChronoTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setRepetitiveDelay(Duration.ofMillis(200));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // First execution
@@ -1274,16 +1280,16 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskChecksIsRunning(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskChecksIsRunning(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final boolean[] wasRunning = { false };
-        Consumer<TimedTask> checkingTask = timedTask -> {
+        Consumer<ChronoTask> checkingTask = ChronoTask -> {
             this.counter.incrementAndGet();
-            wasRunning[0] = timedTask.isRunning();
+            wasRunning[0] = ChronoTask.isRunning();
         };
 
-        TimedTask timer = executor.createTask(checkingTask).build();
+        ChronoTask timer = executor.createTask(checkingTask).build();
 
         timer.start();
         Thread.sleep(50);
@@ -1298,17 +1304,17 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskTriesToRestartItself(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskTriesToRestartItself(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final boolean[] restartResult = { true }; // Default to true, should become false
-        Consumer<TimedTask> restartingTask = timedTask -> {
+        Consumer<ChronoTask> restartingTask = ChronoTask -> {
             this.counter.incrementAndGet();
             // Try to start while already running
-            restartResult[0] = timedTask.start();
+            restartResult[0] = ChronoTask.start();
         };
 
-        TimedTask timer = executor.createTask(restartingTask).build();
+        ChronoTask timer = executor.createTask(restartingTask).build();
 
         timer.start();
         Thread.sleep(50); // Allow execution
@@ -1324,22 +1330,23 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskSelfStopRaceCondition(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskSelfStopRaceCondition(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<TimedTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(100); // Give external thread time to also call stop()
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
-            timedTask.stop(); // Task stops itself
+            ChronoTask.stop(); // Task stops itself
         };
 
-        TimedTaskBuilder builder = executor.createTask(selfStoppingTask);
+        ChronoTaskBuilder builder = executor.createTask(selfStoppingTask);
         builder.setPeriodicDelay(Duration.ofMillis(500));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50); // Allow task to start execution
@@ -1358,28 +1365,29 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMultipleConcurrentTasks(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testMultipleConcurrentTasks(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final int TASK_COUNT = 12;
         AtomicLong[] counters = new AtomicLong[TASK_COUNT];
-        TimedTask[] tasks = new TimedTask[TASK_COUNT];
+        ChronoTask[] tasks = new ChronoTask[TASK_COUNT];
 
         // Create and start multiple tasks
         for (int i = 0; i < TASK_COUNT; i++) {
             final int index = i;
             counters[i] = new AtomicLong(0);
 
-            Consumer<TimedTask> task = _ -> {
+            Consumer<ChronoTask> task = _ -> {
                 counters[index].incrementAndGet();
                 try {
                     Thread.sleep(50); // Small delay to simulate work
-                } catch (InterruptedException _) {
+                }
+                catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             };
 
-            TimedTaskBuilder builder = executor.createTask(task);
+            ChronoTaskBuilder builder = executor.createTask(task);
             builder.setPeriodicDelay(Duration.ofMillis(200));
             tasks[i] = builder.build();
             tasks[i].start();
@@ -1389,7 +1397,7 @@ class TimedTaskTest {
         Thread.sleep(1050);
 
         // Stop all tasks
-        for (TimedTask task : tasks) {
+        for (ChronoTask task : tasks) {
             task.stop();
         }
 
@@ -1406,12 +1414,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopFromAnotherThread(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testStopFromAnotherThread(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(100));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         // Start task in main thread
         timer.start();
@@ -1435,12 +1443,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRaceConditionOnStart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRaceConditionOnStart(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(100));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         final int THREAD_COUNT = 10;
         AtomicLong successCount = new AtomicLong(0);
@@ -1472,12 +1480,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRaceConditionOnStop(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRaceConditionOnStop(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(100));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(50);
@@ -1510,25 +1518,26 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testTaskAccessesSharedState(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testTaskAccessesSharedState(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final int TASK_COUNT = 5;
         AtomicLong sharedCounter = new AtomicLong(0);
-        TimedTask[] tasks = new TimedTask[TASK_COUNT];
+        ChronoTask[] tasks = new ChronoTask[TASK_COUNT];
 
         // Create multiple tasks that all increment the same shared counter
         for (int i = 0; i < TASK_COUNT; i++) {
-            Consumer<TimedTask> task = _ -> {
+            Consumer<ChronoTask> task = _ -> {
                 sharedCounter.incrementAndGet();
                 try {
                     Thread.sleep(50); // Simulate work
-                } catch (InterruptedException _) {
+                }
+                catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             };
 
-            TimedTaskBuilder builder = executor.createTask(task);
+            ChronoTaskBuilder builder = executor.createTask(task);
             builder.setPeriodicDelay(Duration.ofMillis(100));
             tasks[i] = builder.build();
             tasks[i].start();
@@ -1538,7 +1547,7 @@ class TimedTaskTest {
         Thread.sleep(1000);
 
         // Stop all tasks
-        for (TimedTask task : tasks) {
+        for (ChronoTask task : tasks) {
             task.stop();
         }
 
@@ -1556,11 +1565,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testHighFrequencyPeriodic(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testHighFrequencyPeriodic(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
-        TimedTask timer = builder.setPeriodicDelay(Duration.ofMillis(10)).build();
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTask timer = builder.setPeriodicDelay(Duration.ofMillis(10)).build();
 
         timer.start();
 
@@ -1583,11 +1592,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testHighFrequencyRepetitive(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testHighFrequencyRepetitive(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
-        TimedTask timer = builder.setRepetitiveDelay(Duration.ofMillis(10)).build();
+        ChronoTaskBuilder builder = executor.createTask(createTask(0)); // Instant task
+        ChronoTask timer = builder.setRepetitiveDelay(Duration.ofMillis(10)).build();
 
         timer.start();
         Thread.sleep(1000);
@@ -1606,24 +1615,24 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testManyShortTasks(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testManyShortTasks(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final int TASK_COUNT = 50;
-        TimedTask[] tasks = new TimedTask[TASK_COUNT];
+        ChronoTask[] tasks = new ChronoTask[TASK_COUNT];
         AtomicLong[] counters = new AtomicLong[TASK_COUNT];
 
         // Create many short tasks
         for (int i = 0; i < TASK_COUNT; i++) {
             final int index = i;
             counters[i] = new AtomicLong(0);
-            Consumer<TimedTask> task = _ -> counters[index].incrementAndGet();
+            Consumer<ChronoTask> task = _ -> counters[index].incrementAndGet();
             tasks[i] = executor.createTask(task).build();
         }
 
         // Start all tasks in quick succession
         long startTime = System.currentTimeMillis();
-        for (TimedTask task : tasks) {
+        for (ChronoTask task : tasks) {
             task.start();
         }
         long endTime = System.currentTimeMillis();
@@ -1647,15 +1656,15 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMemoryLeakOnRepeatedCreation(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testMemoryLeakOnRepeatedCreation(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         final int ITERATIONS = 100;
         AtomicLong totalExecutions = new AtomicLong(0);
 
         for (int i = 0; i < ITERATIONS; i++) {
-            Consumer<TimedTask> task = _ -> totalExecutions.incrementAndGet();
-            TimedTask timer = executor.createTask(task).build();
+            Consumer<ChronoTask> task = _ -> totalExecutions.incrementAndGet();
+            ChronoTask timer = executor.createTask(task).build();
 
             // Start and immediately stop (or let it complete)
             timer.start();
@@ -1681,28 +1690,29 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testVeryLongRunningTask(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testVeryLongRunningTask(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<TimedTask> longTask = _ -> {
+        Consumer<ChronoTask> longTask = _ -> {
             try {
                 this.counter.incrementAndGet();
                 Thread.sleep(Duration.ofSeconds(10));
                 this.counter.incrementAndGet();
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
 
-        var timedTask = executor.createTask(longTask).build();
-        timedTask.start();
+        var ChronoTask = executor.createTask(longTask).build();
+        ChronoTask.start();
         Thread.sleep(50); // Wait for task to start
         assertEquals(1, this.counter.get(), "Task should have started");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(9500);
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(1000);
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
         assertEquals(2, this.counter.get(), "Task should have started");
     }
 
@@ -1712,10 +1722,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testPeriodicWithZeroDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testPeriodicWithZeroDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
-        TimedTask timer = builder.setPeriodicDelay(Duration.ZERO).build();
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTask timer = builder.setPeriodicDelay(Duration.ZERO).build();
 
         timer.start();
         Thread.sleep(100);
@@ -1737,10 +1747,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRepetitiveWithZeroDelay(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRepetitiveWithZeroDelay(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
-        TimedTask timer = builder.setRepetitiveDelay(Duration.ZERO).build();
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTask timer = builder.setRepetitiveDelay(Duration.ZERO).build();
 
         timer.start();
         Thread.sleep(100);
@@ -1762,10 +1772,10 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopImmediatelyAfterStart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testStopImmediatelyAfterStart(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
-        TimedTask timer = builder.setPeriodicDelay(Duration.ofMillis(100)).build();
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTask timer = builder.setPeriodicDelay(Duration.ofMillis(100)).build();
 
         timer.start();
         timer.stop();
@@ -1788,39 +1798,40 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRestartDuringExecution(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRestartDuringExecution(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<TimedTask> longTask = _ -> {
+        Consumer<ChronoTask> longTask = _ -> {
             try {
                 this.counter.incrementAndGet();
                 Thread.sleep(Duration.ofSeconds(2));
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
 
-        var timedTask = executor.createTask(longTask).build();
+        var ChronoTask = executor.createTask(longTask).build();
 
-        timedTask.start();
+        ChronoTask.start();
         Thread.sleep(50); // Wait for task to start executing
         assertEquals(1, this.counter.get(), "Task should be executing");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
         // Stop while task is executing
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
 
         Thread.sleep(2100); // Wait for task to finish
         long countAfterStop = this.counter.get();
 
         // Restart
-        assertTrue(timedTask.start(), "Should be able to restart");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start(), "Should be able to restart");
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(50);
         assertTrue(this.counter.get() > countAfterStop, "Counter should increment after restart");
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -1829,24 +1840,24 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testRestartImmediatelyAfterStop(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testRestartImmediatelyAfterStop(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(0)).build();
+        var ChronoTask = executor.createTask(createTask(0)).build();
 
         // First start
-        timedTask.start();
+        ChronoTask.start();
         Thread.sleep(50);
         long firstCount = this.counter.get();
         assertTrue(firstCount >= 1, "Should have at least 1 execution");
 
         // immediately restart
-        assertTrue(timedTask.start(), "Immediate restart should succeed");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start(), "Immediate restart should succeed");
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(50);
         long secondCount = this.counter.get();
         assertTrue(secondCount > firstCount, "Should have more executions after restart");
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -1855,12 +1866,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testBuildWithoutStart(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testBuildWithoutStart(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setPeriodicDelay(Duration.ofMillis(10));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         // Don't call start(), just wait
         assertEquals(State.STOPPED, timer.getState());
@@ -1886,15 +1897,14 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopInterruptsTimerThreadDuringSleep(final AbstractTimedTaskExecutor executor)
-            throws InterruptedException {
+    void testStopInterruptsTimerThreadDuringSleep(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         // instant task, 60-second repetitive delay — after first execution the timer
         // thread enters Thread.sleep() for 60 seconds
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
         builder.setRepetitiveDelay(Duration.ofSeconds(60));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150); // wait for first execution to complete
@@ -1916,14 +1926,13 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMaxConcurrentExecutionsThrottlesOverlap(final AbstractTimedTaskExecutor executor)
-            throws InterruptedException {
+    void testMaxConcurrentExecutionsThrottlesOverlap(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
         AtomicInteger inFlight = new AtomicInteger(0);
         AtomicInteger peak = new AtomicInteger(0);
-        TimedTaskBuilder builder = executor.createTask(createThrottleTrackingTask(500, inFlight, peak));
+        ChronoTaskBuilder builder = executor.createTask(createThrottleTrackingTask(500, inFlight, peak));
         builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(2);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(1200);
@@ -1939,14 +1948,14 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMaxConcurrentExecutionsSerializesWhenSetToOne(final AbstractTimedTaskExecutor executor)
+    void testMaxConcurrentExecutionsSerializesWhenSetToOne(final AbstractExecutor executor)
             throws InterruptedException {
         this.currentExecutor = executor;
         AtomicInteger inFlight = new AtomicInteger(0);
         AtomicInteger peak = new AtomicInteger(0);
-        TimedTaskBuilder builder = executor.createTask(createThrottleTrackingTask(300, inFlight, peak));
+        ChronoTaskBuilder builder = executor.createTask(createThrottleTrackingTask(300, inFlight, peak));
         builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(1);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(1000);
@@ -1962,14 +1971,14 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testMaxConcurrentExecutionsDefaultAllowsUnboundedOverlap(final AbstractTimedTaskExecutor executor)
+    void testMaxConcurrentExecutionsDefaultAllowsUnboundedOverlap(final AbstractExecutor executor)
             throws InterruptedException {
         this.currentExecutor = executor;
         AtomicInteger inFlight = new AtomicInteger(0);
         AtomicInteger peak = new AtomicInteger(0);
-        TimedTaskBuilder builder = executor.createTask(createThrottleTrackingTask(1000, inFlight, peak));
+        ChronoTaskBuilder builder = executor.createTask(createThrottleTrackingTask(1000, inFlight, peak));
         builder.setPeriodicDelay(Duration.ofMillis(300));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(900);
@@ -1983,9 +1992,9 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testSetMaxConcurrentExecutionsRejectsInvalidValue(final AbstractTimedTaskExecutor executor) {
+    void testSetMaxConcurrentExecutionsRejectsInvalidValue(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(0));
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
 
         assertThrowsExactly(IllegalArgumentException.class, () -> builder.setMaxConcurrentExecutions(0));
         assertThrowsExactly(IllegalArgumentException.class, () -> builder.setMaxConcurrentExecutions(-1));
@@ -1997,12 +2006,12 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testSetMaxConcurrentExecutionsReturnsFalseWhenRunning(final AbstractTimedTaskExecutor executor)
+    void testSetMaxConcurrentExecutionsReturnsFalseWhenRunning(final AbstractExecutor executor)
             throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(1));
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setPeriodicDelay(Duration.ofSeconds(10));
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         Thread.sleep(150);
@@ -2019,11 +2028,11 @@ class TimedTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopWhileBlockedOnThrottle(final AbstractTimedTaskExecutor executor) throws InterruptedException {
+    void testStopWhileBlockedOnThrottle(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        TimedTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
+        ChronoTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
         builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(1);
-        TimedTask timer = builder.build();
+        ChronoTask timer = builder.build();
 
         timer.start();
         // First execution starts immediately and holds the single permit; the timer
@@ -2042,12 +2051,13 @@ class TimedTaskTest {
 
     // ========== Helper Methods ==========
 
-    private Consumer<TimedTask> createTask(final int seconds) {
+    private Consumer<ChronoTask> createTask(final int seconds) {
         return _ -> {
             try {
                 this.counter.incrementAndGet();
                 Thread.sleep(Duration.ofSeconds(seconds));
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };
@@ -2057,16 +2067,18 @@ class TimedTaskTest {
      * Creates a task that tracks the number of concurrently in-flight executions,
      * recording the highest concurrency level observed in {@code peak}.
      */
-    private Consumer<TimedTask> createThrottleTrackingTask(final long durationMillis, final AtomicInteger inFlight,
+    private Consumer<ChronoTask> createThrottleTrackingTask(final long durationMillis, final AtomicInteger inFlight,
             final AtomicInteger peak) {
         return _ -> {
             int current = inFlight.incrementAndGet();
             peak.updateAndGet(p -> Math.max(p, current));
             try {
                 Thread.sleep(durationMillis);
-            } catch (InterruptedException _) {
+            }
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
-            } finally {
+            }
+            finally {
                 inFlight.decrementAndGet();
             }
         };

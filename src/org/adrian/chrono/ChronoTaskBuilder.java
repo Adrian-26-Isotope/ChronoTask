@@ -1,16 +1,16 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 import java.util.function.Consumer;
 
 /**
- * builder pattern for scheduling a {@link TimedTask}.
+ * builder pattern for scheduling a {@link ChronoTask}.
  */
-public class TimedTaskBuilder {
+public class ChronoTaskBuilder {
 
     // mandatory args
-    private final Consumer<TimedTask> task;
-    private final AbstractTimedTaskExecutor executor;
+    private final Consumer<ChronoTask> task;
+    private final AbstractExecutor executor;
 
     // optional args
     private String name;
@@ -20,16 +20,16 @@ public class TimedTaskBuilder {
     private int maxConcurrentExecutions = Integer.MAX_VALUE;
 
     /**
-     * @param task     the task to be executed by the timer.
+     * @param task the task to be executed by the timer.
      * @param executor the executor to run the timer and task.
      * @warning Avoid using strong references to external objects within the task.
      *          Strong references will keep objects in scope for the entire lifetime
-     *          of this {@link TimedTask}, preventing garbage collection and
+     *          of this {@link ChronoTask}, preventing garbage collection and
      *          potentially causing memory leaks. Consider using weak references or
-     *          ensuring proper cleanup when the {@link TimedTask} is no longer
+     *          ensuring proper cleanup when the {@link ChronoTask} is no longer
      *          needed.
      */
-    protected TimedTaskBuilder(final Consumer<TimedTask> task, final AbstractTimedTaskExecutor executor) {
+    protected ChronoTaskBuilder(final Consumer<ChronoTask> task, final AbstractExecutor executor) {
         this.task = task;
         this.executor = executor;
     }
@@ -42,7 +42,7 @@ public class TimedTaskBuilder {
      * @return this builder instance for method chaining
      * @throws IllegalArgumentException if the given duration is negative
      */
-    public TimedTaskBuilder setInitialDelay(final Duration initialDelay) {
+    public ChronoTaskBuilder setInitialDelay(final Duration initialDelay) {
         if (initialDelay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -60,7 +60,7 @@ public class TimedTaskBuilder {
      * @param delay the fixed delay between task executions
      * @return this builder instance for method chaining
      */
-    public TimedTaskBuilder setPeriodicDelay(final Duration delay) {
+    public ChronoTaskBuilder setPeriodicDelay(final Duration delay) {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -79,7 +79,7 @@ public class TimedTaskBuilder {
      * @param delay the delay between consecutive task executions
      * @return this builder instance for method chaining
      */
-    public TimedTaskBuilder setRepetitiveDelay(final Duration delay) {
+    public ChronoTaskBuilder setRepetitiveDelay(final Duration delay) {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -95,7 +95,7 @@ public class TimedTaskBuilder {
      * @param name the name of the task.
      * @return this builder instance for method chaining.
      */
-    public TimedTaskBuilder setName(final String name) {
+    public ChronoTaskBuilder setName(final String name) {
         this.name = new String(name);
         return this;
     }
@@ -109,7 +109,7 @@ public class TimedTaskBuilder {
      * @return this builder instance for method chaining
      * @throws IllegalArgumentException if {@code max} is less than 1
      */
-    public TimedTaskBuilder setMaxConcurrentExecutions(final int max) {
+    public ChronoTaskBuilder setMaxConcurrentExecutions(final int max) {
         if (max < 1) {
             throw new IllegalArgumentException("max concurrent executions must be at least 1.");
         }
@@ -121,10 +121,10 @@ public class TimedTaskBuilder {
      * build the timer with configured settings. The task needs to be started
      * separately!
      *
-     * @return the TimedTask instance.
+     * @return the ChronoTask instance.
      */
-    public TimedTask build() {
-        TimedTask timer = new TimedTask(this.task, this.executor);
+    public ChronoTask build() {
+        ChronoTask timer = new ChronoTask(this.task, this.executor);
         if ((this.name != null) && !this.name.isBlank()) {
             timer.setName(this.name);
         }

@@ -1,18 +1,18 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 import java.util.function.Function;
 
 /**
- * builder pattern for scheduling a {@link FutureTimedTask}.
+ * builder pattern for scheduling a {@link FutureChronoTask}.
  *
  * @param <T> the result type of the callable
  */
-public class FutureTimedTaskBuilder<T> {
+public class FutureChronoTaskBuilder<T> {
 
     // mandatory args
-    private final Function<FutureTimedTask<T>, T> callable;
-    private final AbstractTimedTaskExecutor executor;
+    private final Function<FutureChronoTask<T>, T> callable;
+    private final AbstractExecutor executor;
 
     // optional args
     private String name;
@@ -25,13 +25,13 @@ public class FutureTimedTaskBuilder<T> {
      * @param executor the executor to run the timer and task.
      * @warning Avoid using strong references to external objects within the
      *          callable. Strong references will keep objects in scope for the
-     *          entire lifetime of this {@link FutureTimedTask}, preventing garbage
+     *          entire lifetime of this {@link FutureChronoTask}, preventing garbage
      *          collection and potentially causing memory leaks. Consider using weak
      *          references or ensuring proper cleanup when the
-     *          {@link FutureTimedTask} is no longer needed.
+     *          {@link FutureChronoTask} is no longer needed.
      */
-    protected FutureTimedTaskBuilder(final Function<FutureTimedTask<T>, T> callable,
-            final AbstractTimedTaskExecutor executor) {
+    protected FutureChronoTaskBuilder(final Function<FutureChronoTask<T>, T> callable,
+            final AbstractExecutor executor) {
         this.callable = callable;
         this.executor = executor;
     }
@@ -44,7 +44,7 @@ public class FutureTimedTaskBuilder<T> {
      * @return this builder instance for method chaining
      * @throws IllegalArgumentException if the given duration is negative
      */
-    public FutureTimedTaskBuilder<T> setInitialDelay(final Duration initialDelay) {
+    public FutureChronoTaskBuilder<T> setInitialDelay(final Duration initialDelay) {
         if (initialDelay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -62,7 +62,7 @@ public class FutureTimedTaskBuilder<T> {
      * @param delay the fixed delay between task executions
      * @return this builder instance for method chaining
      */
-    public FutureTimedTaskBuilder<T> setPeriodicDelay(final Duration delay) {
+    public FutureChronoTaskBuilder<T> setPeriodicDelay(final Duration delay) {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -81,7 +81,7 @@ public class FutureTimedTaskBuilder<T> {
      * @param delay the delay between consecutive task executions
      * @return this builder instance for method chaining
      */
-    public FutureTimedTaskBuilder<T> setRepetitiveDelay(final Duration delay) {
+    public FutureChronoTaskBuilder<T> setRepetitiveDelay(final Duration delay) {
         if (delay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -97,7 +97,7 @@ public class FutureTimedTaskBuilder<T> {
      * @param name the name of the task.
      * @return this builder instance for method chaining.
      */
-    public FutureTimedTaskBuilder<T> setName(final String name) {
+    public FutureChronoTaskBuilder<T> setName(final String name) {
         this.name = new String(name);
         return this;
     }
@@ -106,10 +106,10 @@ public class FutureTimedTaskBuilder<T> {
      * build the timer with configured settings. The task needs to be started
      * separately!
      *
-     * @return the {@link FutureTimedTask} instance.
+     * @return the {@link FutureChronoTask} instance.
      */
-    public FutureTimedTask<T> build() {
-        FutureTimedTask<T> task = new FutureTimedTask<>(this.callable, this.executor);
+    public FutureChronoTask<T> build() {
+        FutureChronoTask<T> task = new FutureChronoTask<>(this.callable, this.executor);
         if ((this.name != null) && !this.name.isBlank()) {
             task.setName(this.name);
         }

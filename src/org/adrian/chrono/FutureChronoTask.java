@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -16,14 +16,14 @@ import java.util.function.Function;
  * following execution so callers can chain results without a race.
  * </p>
  * <p>
- * Instances are created via {@link AbstractTimedTaskExecutor#createFutureTask(Function)}.
+ * Instances are created via {@link AbstractExecutor#createFutureTask(Function)}.
  * </p>
  *
  * @param <T> the type of the result produced by the task.
  */
-public class FutureTimedTask<T> {
+public class FutureChronoTask<T> {
 
-    private final TimedTask timedTask;
+    private final ChronoTask chronoTask;
     private final AtomicReference<CompletableFuture<T>> nextResult;
     private volatile T lastResult;
 
@@ -32,14 +32,14 @@ public class FutureTimedTask<T> {
      *            instance as argument.
      * @param executor the executor that runs the underlying timer and task threads.
      */
-    FutureTimedTask(final Function<FutureTimedTask<T>, T> task, final AbstractTimedTaskExecutor executor) {
+    FutureChronoTask(final Function<FutureChronoTask<T>, T> task, final AbstractExecutor executor) {
         Objects.requireNonNull(task);
         this.nextResult = new AtomicReference<>(new CompletableFuture<>());
 
-        Consumer<TimedTask> consumer = _ -> {
+        Consumer<ChronoTask> consumer = _ -> {
             CompletableFuture<T> currentFuture = this.nextResult.getAndSet(new CompletableFuture<>());
             try {
-                T result = task.apply(FutureTimedTask.this);
+                T result = task.apply(FutureChronoTask.this);
                 this.lastResult = result;
                 currentFuture.complete(result);
             }
@@ -48,7 +48,7 @@ public class FutureTimedTask<T> {
             }
         };
 
-        this.timedTask = executor.createTask(consumer).build();
+        this.chronoTask = executor.createTask(consumer).build();
     }
 
     /**
@@ -66,7 +66,7 @@ public class FutureTimedTask<T> {
             return null;
         }
         CompletableFuture<T> next = getNextResult();
-        this.timedTask.start();
+        this.chronoTask.start();
         return next;
     }
 
@@ -75,7 +75,7 @@ public class FutureTimedTask<T> {
      * stopped the task can be started again via {@link #start()}.
      */
     public void stop() {
-        this.timedTask.stop();
+        this.chronoTask.stop();
     }
 
     /**
@@ -83,7 +83,7 @@ public class FutureTimedTask<T> {
      *         otherwise
      */
     public boolean isRunning() {
-        return this.timedTask.isRunning();
+        return this.chronoTask.isRunning();
     }
 
     /**
@@ -116,7 +116,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     public boolean setInitialDelay(final Duration delay) {
-        return this.timedTask.setInitialDelay(delay);
+        return this.chronoTask.setInitialDelay(delay);
     }
 
     /**
@@ -127,7 +127,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     public boolean setPeriodicDelay(final Duration delay) {
-        return this.timedTask.setPeriodicDelay(delay);
+        return this.chronoTask.setPeriodicDelay(delay);
     }
 
     /**
@@ -138,7 +138,7 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     public boolean setRepetitiveDelay(final Duration delay) {
-        return this.timedTask.setRepetitiveDelay(delay);
+        return this.chronoTask.setRepetitiveDelay(delay);
     }
 
     /**
@@ -146,6 +146,6 @@ public class FutureTimedTask<T> {
      * @return false if the task is currently running
      */
     public boolean setName(final String name) {
-        return this.timedTask.setName(name);
+        return this.chronoTask.setName(name);
     }
 }

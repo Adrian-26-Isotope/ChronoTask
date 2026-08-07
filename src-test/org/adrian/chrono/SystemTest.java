@@ -1,4 +1,4 @@
-package adrian.os.java.timer;
+package org.adrian.chrono;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,14 +14,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.adrian.threadpool.ElasticThreadPool;
 import org.junit.jupiter.api.Test;
-
-import adrian.os.java.threadpool.CustomThreadPool;
 
 class SystemTest {
 
     /**
-     * ensure that uncaught errors thrown by a TimedTask are forwarded to the
+     * ensure that uncaught errors thrown by a ChronoTask are forwarded to the
      * thread's uncaught exception handler.
      */
     @Test
@@ -29,7 +28,7 @@ class SystemTest {
         AtomicReference<Throwable> caught = new AtomicReference<>();
         CountDownLatch latch = new CountDownLatch(1);
 
-        TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
+        ThreadExecutor executor = new ThreadExecutor();
         executor.setThreadFactory(r -> {
             Thread thread = Thread.ofVirtual().unstarted(r);
             thread.setUncaughtExceptionHandler((_, e) -> {
@@ -39,13 +38,13 @@ class SystemTest {
             return thread;
         });
 
-        TimedTask task = executor.createTask(_ -> {
+        ChronoTask task = executor.createTask(_ -> {
             throw new Error("boom-thread");
         }).build();
         task.start();
 
         assertTrue(latch.await(2, TimeUnit.SECONDS),
-                "uncaught exception handler should be invoked for TimedTaskThreadExecutor");
+                "uncaught exception handler should be invoked for ThreadExecutor");
         assertNotNull(caught.get());
         assertEquals("boom-thread", caught.get().getMessage());
     }
@@ -58,8 +57,8 @@ class SystemTest {
         AtomicReference<Throwable> caught = new AtomicReference<>();
         CountDownLatch latch = new CountDownLatch(1);
 
-        CustomThreadPool pool =
-                CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2)).setThreadFactory(r -> {
+        ElasticThreadPool pool =
+                ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2)).setThreadFactory(r -> {
                     Thread thread = Thread.ofVirtual().unstarted(r);
                     thread.setUncaughtExceptionHandler((_, e) -> {
                         caught.set(e);
@@ -68,15 +67,15 @@ class SystemTest {
                     return thread;
                 }).build();
 
-        TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor(pool);
+        PoolExecutor executor = new PoolExecutor(pool);
         try {
-            TimedTask task = executor.createTask(_ -> {
+            ChronoTask task = executor.createTask(_ -> {
                 throw new Error("boom-pool");
             }).build();
             task.start();
 
             assertTrue(latch.await(2, TimeUnit.SECONDS),
-                    "uncaught exception handler should be invoked for TimedTaskPoolExecutor");
+                    "uncaught exception handler should be invoked for PoolExecutor");
             assertNotNull(caught.get());
             assertEquals("boom-pool", caught.get().getMessage());
         }
@@ -87,12 +86,12 @@ class SystemTest {
     }
 
     /**
-     * ensure that FutureTimedTask.start() never leaves an uncompleted future.
+     * ensure that FutureChronoTask.start() never leaves an uncompleted future.
      */
     @Test
     void testFutureTimedTaskReusesSameFutureWhenRestartedBeforeFirstExecution() throws InterruptedException {
-        TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
-        FutureTimedTask<Integer> task =
+        ThreadExecutor executor = new ThreadExecutor();
+        FutureChronoTask<Integer> task =
                 executor.<Integer>createFutureTask(_ -> 42).setInitialDelay(Duration.ofSeconds(10)).build();
 
         CompletableFuture<Integer> first = task.start();
@@ -115,11 +114,11 @@ class SystemTest {
     void testDurationDefensiveCopyDoesNotActuallyCopy() throws Exception {
         Duration original = Duration.ofSeconds(42);
 
-        TimedTaskThreadExecutor executor = new TimedTaskThreadExecutor();
-        TimedTaskBuilder builder = executor.createTask(_ -> {});
+        ThreadExecutor executor = new ThreadExecutor();
+        ChronoTaskBuilder builder = executor.createTask(_ -> {});
         builder.setInitialDelay(original);
 
-        Field field = TimedTaskBuilder.class.getDeclaredField("initialDelay");
+        Field field = ChronoTaskBuilder.class.getDeclaredField("initialDelay");
         field.setAccessible(true);
         Duration stored = (Duration) field.get(builder);
 
@@ -134,14 +133,14 @@ class SystemTest {
      */
     @Test
     void testStartDoesNotDeadlockWhenPoolExecutorRejectsSubmission() throws Exception {
-        CustomThreadPool pool = CustomThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2))
+        ElasticThreadPool pool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2))
                 .setName("dropped-submission-pool").build();
-        TimedTaskPoolExecutor executor = new TimedTaskPoolExecutor(pool);
+        PoolExecutor executor = new PoolExecutor(pool);
         // shut down the pool BEFORE the task ever gets a chance to run
         executor.shutdown();
         Thread.sleep(50);
 
-        TimedTask task = executor.createTask(_ -> {}).build();
+        ChronoTask task = executor.createTask(_ -> {}).build();
 
         boolean started = task.start();
         assertFalse(started, "start() should report failure (return false) when the pool rejects the submission, " +
@@ -166,7 +165,7 @@ class SystemTest {
         restartThread.join(1000);
 
         assertTrue(completedInTime,
-                "start() on a TimedTask whose pool executor rejected an earlier submission must return " +
+                "start() on a ChronoTask whose pool executor rejected an earlier submission must return " +
                         "promptly instead of deadlocking, because the task is rolled back to STOPPED rather " +
                         "than left stuck in SHUTDOWN with no thread to notify its waiting monitor");
     }

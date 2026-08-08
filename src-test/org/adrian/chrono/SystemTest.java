@@ -65,7 +65,7 @@ class SystemTest {
                         latch.countDown();
                     });
                     return thread;
-                }).build();
+                }).start();
 
         PoolExecutor executor = new PoolExecutor(pool);
         try {
@@ -134,7 +134,7 @@ class SystemTest {
     @Test
     void testStartDoesNotDeadlockWhenPoolExecutorRejectsSubmission() throws Exception {
         ElasticThreadPool pool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(2))
-                .setName("dropped-submission-pool").build();
+                .setName("dropped-submission-pool").start();
         PoolExecutor executor = new PoolExecutor(pool);
         // shut down the pool BEFORE the task ever gets a chance to run
         executor.shutdown();

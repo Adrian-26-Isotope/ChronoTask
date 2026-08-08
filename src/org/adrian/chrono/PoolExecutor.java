@@ -26,7 +26,7 @@ public class PoolExecutor extends AbstractExecutor {
 
 
     /**
-     * Constructs a new {@code PoolExecutor}.
+     * Constructs a new {@code TimedTaskPoolExecutor}.
      * <p>
      * Initializes a {@link ElasticThreadPool} with minimum threads set to 0 and an
      * idle time of 60 seconds.
@@ -34,11 +34,11 @@ public class PoolExecutor extends AbstractExecutor {
      */
     public PoolExecutor() {
         this.name = null;
-        this.threadPool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).build();
+        this.threadPool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).start();
     }
 
     /**
-     * Constructs a new {@code PoolExecutor} with the specified name.
+     * Constructs a new {@code TimedTaskPoolExecutor} with the specified name.
      * <p>
      * Initializes a {@link ElasticThreadPool} with minimum threads set to 0 and an
      * idle time of 60 seconds.
@@ -49,7 +49,7 @@ public class PoolExecutor extends AbstractExecutor {
     public PoolExecutor(final String name) {
         this.name = name;
         this.threadPool =
-                ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name).build();
+                ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name).start();
     }
 
     /**

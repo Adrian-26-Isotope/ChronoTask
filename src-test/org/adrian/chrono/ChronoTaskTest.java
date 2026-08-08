@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
@@ -46,20 +47,19 @@ class ChronoTaskTest {
      * Provides both executor implementations for parameterized tests.
      */
     static Stream<Arguments> executorProvider() {
-        return Stream.of(Arguments.of(new ThreadExecutor()),
-                Arguments.of(new PoolExecutor(ElasticThreadPool.builder().setMinThreads(0)
-                        .setIdleTime(Duration.ofSeconds(2)).setName("test-pool").build())));
+        return Stream.of(Arguments.of(new ThreadExecutor()), Arguments.of(new PoolExecutor(ElasticThreadPool.builder()
+                .setMinThreads(0).setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
     }
 
     @ParameterizedTest
     @MethodSource("executorProvider")
     void testState(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
-        timedTask.start();
-        assertEquals(State.RUNNING, timedTask.getState());
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        var ChronoTask = executor.createTask(createTask(1)).build();
+        ChronoTask.start();
+        assertEquals(State.RUNNING, ChronoTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
     }
 
     @ParameterizedTest
@@ -133,8 +133,8 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testStateAfterBuild(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
-        assertEquals(State.STOPPED, timedTask.getState());
+        var ChronoTask = executor.createTask(createTask(1)).build();
+        assertEquals(State.STOPPED, ChronoTask.getState());
     }
 
     /**
@@ -144,17 +144,17 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testDoubleStart(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
         // First start should succeed
-        assertTrue(timedTask.start());
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
         // Second start should fail (already running)
-        assertFalse(timedTask.start());
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertFalse(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -164,11 +164,11 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testStopBeforeStart(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
-        assertEquals(State.STOPPED, timedTask.getState());
-        timedTask.stop(); // Should be no-op
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
+        ChronoTask.stop(); // Should be no-op
+        assertEquals(State.STOPPED, ChronoTask.getState());
     }
 
     /**
@@ -178,22 +178,22 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testMultipleStops(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
-        timedTask.start();
-        assertEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.start();
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
 
-        timedTask.stop(); // Second stop should be safe
-        assertNotEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.stop(); // Second stop should be safe
+        assertNotEquals(State.RUNNING, ChronoTask.getState());
 
-        timedTask.stop(); // Third stop should be safe
-        assertNotEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.stop(); // Third stop should be safe
+        assertNotEquals(State.RUNNING, ChronoTask.getState());
 
         Thread.sleep(Duration.ofMillis(100));
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
     }
 
     /**
@@ -203,10 +203,10 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testStateAfterCompletion(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build();
+        var ChronoTask = executor.createTask(createTask(1)).build();
 
-        timedTask.start();
-        assertEquals(State.RUNNING, timedTask.getState());
+        ChronoTask.start();
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
         // Wait for task to execute and complete
         Thread.sleep(100); // Start execution
@@ -215,7 +215,7 @@ class ChronoTaskTest {
         Thread.sleep(1100); // Wait for task duration (1 second)
 
         // Task should have completed and state should be NOT_RUNNING
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
         assertEquals(1, this.counter.get());
     }
 
@@ -228,27 +228,27 @@ class ChronoTaskTest {
         this.currentExecutor = executor;
         ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setPeriodicDelay(Duration.ofSeconds(2));
-        ChronoTask chronoTask = builder.build();
+        ChronoTask ChronoTask = builder.build();
 
         // First start
-        assertTrue(chronoTask.start());
-        assertEquals(State.RUNNING, chronoTask.getState());
+        assertTrue(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(150); // Allow task to execute
         assertEquals(1, this.counter.get());
 
         // Stop the task
-        chronoTask.stop();
-        assertEquals(State.SHUTDOWN, chronoTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
         Thread.sleep(100);
         long countAfterStop = this.counter.get();
 
         // Restart the task
-        assertTrue(chronoTask.start());
-        assertEquals(State.RUNNING, chronoTask.getState());
+        assertTrue(ChronoTask.start());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(150); // Allow task to execute
         assertTrue(this.counter.get() > countAfterStop, "Counter should increment after restart");
 
-        chronoTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -258,16 +258,16 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testMultipleRestarts(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(1)).build(); // single execution task
+        var ChronoTask = executor.createTask(createTask(1)).build(); // single execution task
 
         for (int i = 1; i <= 3; i++) {
             // Start the task
-            assertTrue(timedTask.start(), "Start should succeed on iteration " + i);
-            assertEquals(State.RUNNING, timedTask.getState());
+            assertTrue(ChronoTask.start(), "Start should succeed on iteration " + i);
+            assertEquals(State.RUNNING, ChronoTask.getState());
             Thread.sleep(150); // Allow task to execute
             assertEquals(i, this.counter.get(), "Counter should be " + i + " on iteration " + i);
             Thread.sleep(1000); // Wait for task to complete
-            assertEquals(State.STOPPED, timedTask.getState());
+            assertEquals(State.STOPPED, ChronoTask.getState());
         }
     }
 
@@ -281,27 +281,27 @@ class ChronoTaskTest {
         this.currentExecutor = executor;
         ChronoTaskBuilder builder = executor.createTask(createTask(1));
         builder.setInitialDelay(Duration.ofMillis(500));
-        ChronoTask chronoTask = builder.build();
+        ChronoTask ChronoTask = builder.build();
 
         // First start - verify initial delay
-        chronoTask.start();
+        ChronoTask.start();
         Thread.sleep(200);
         assertEquals(0, this.counter.get(), "Task should not execute yet (initial delay)");
         Thread.sleep(400);
         assertEquals(1, this.counter.get(), "Task should execute after initial delay");
         Thread.sleep(1100); // Wait for completion
-        chronoTask.stop();
+        ChronoTask.stop();
 
         Thread.sleep(500);
 
         // Restart - verify initial delay is still applied
         this.counter.set(0);
-        chronoTask.start();
+        ChronoTask.start();
         Thread.sleep(200);
         assertEquals(0, this.counter.get(), "Task should not execute yet on restart (initial delay)");
         Thread.sleep(400);
         assertEquals(1, this.counter.get(), "Task should execute after initial delay on restart");
-        chronoTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -792,12 +792,12 @@ class ChronoTaskTest {
         final long startTime = System.currentTimeMillis();
         final long[] actualExecutionTime = { 0 };
 
-        Consumer<ChronoTask> chronoTask = _ -> {
+        Consumer<ChronoTask> ChronoTask = _ -> {
             actualExecutionTime[0] = System.currentTimeMillis();
             this.counter.incrementAndGet();
         };
 
-        ChronoTaskBuilder builder = executor.createTask(chronoTask);
+        ChronoTaskBuilder builder = executor.createTask(ChronoTask);
         Duration initialDelay = Duration.ofMillis(357);
         builder.setInitialDelay(initialDelay);
         ChronoTask timer = builder.build();
@@ -831,14 +831,14 @@ class ChronoTaskTest {
         final long startTime = System.currentTimeMillis();
         final List<Long> executionTimes = new java.util.ArrayList<>();
 
-        Consumer<ChronoTask> chronoTask = _ -> {
+        Consumer<ChronoTask> ChronoTask = _ -> {
             synchronized (executionTimes) {
                 executionTimes.add(System.currentTimeMillis() - startTime);
                 this.counter.incrementAndGet();
             }
         };
 
-        ChronoTaskBuilder builder = executor.createTask(chronoTask);
+        ChronoTaskBuilder builder = executor.createTask(ChronoTask);
         Duration periodicDelay = Duration.ofMillis(300);
         builder.setPeriodicDelay(periodicDelay);
         ChronoTask timer = builder.build();
@@ -875,7 +875,7 @@ class ChronoTaskTest {
         final List<Long> executionEndTimes = new java.util.ArrayList<>();
         final Duration taskDuration = Duration.ofMillis(200);
 
-        Consumer<ChronoTask> chronoTask = _ -> {
+        Consumer<ChronoTask> ChronoTask = _ -> {
             synchronized (executionStartTimes) {
                 executionStartTimes.add(System.currentTimeMillis());
             }
@@ -891,7 +891,7 @@ class ChronoTaskTest {
             }
         };
 
-        ChronoTaskBuilder builder = executor.createTask(chronoTask);
+        ChronoTaskBuilder builder = executor.createTask(ChronoTask);
         Duration repetitiveDelay = Duration.ofMillis(300);
         builder.setRepetitiveDelay(repetitiveDelay);
         ChronoTask timer = builder.build();
@@ -1178,7 +1178,7 @@ class ChronoTaskTest {
     }
 
     /**
-     * Tests that a task can stop itself by calling timedTask.stop().
+     * Tests that a task can stop itself by calling ChronoTask.stop().
      * The task receives a reference to its timer and can control its own execution.
      */
     @ParameterizedTest
@@ -1186,10 +1186,10 @@ class ChronoTaskTest {
     void testTaskStopsItself(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<ChronoTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             this.counter.incrementAndGet();
             // Task stops itself after first execution
-            timedTask.stop();
+            ChronoTask.stop();
         };
 
         ChronoTaskBuilder builder = executor.createTask(selfStoppingTask);
@@ -1214,10 +1214,10 @@ class ChronoTaskTest {
         this.currentExecutor = executor;
 
         final int stopAfter = 3;
-        Consumer<ChronoTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             long count = this.counter.incrementAndGet();
             if (count >= stopAfter) {
-                timedTask.stop();
+                ChronoTask.stop();
             }
         };
 
@@ -1249,10 +1249,10 @@ class ChronoTaskTest {
         this.currentExecutor = executor;
 
         final int stopAfter = 3;
-        Consumer<ChronoTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             long count = this.counter.incrementAndGet();
             if (count >= stopAfter) {
-                timedTask.stop();
+                ChronoTask.stop();
             }
         };
 
@@ -1284,9 +1284,9 @@ class ChronoTaskTest {
         this.currentExecutor = executor;
 
         final boolean[] wasRunning = { false };
-        Consumer<ChronoTask> checkingTask = timedTask -> {
+        Consumer<ChronoTask> checkingTask = ChronoTask -> {
             this.counter.incrementAndGet();
-            wasRunning[0] = timedTask.isRunning();
+            wasRunning[0] = ChronoTask.isRunning();
         };
 
         ChronoTask timer = executor.createTask(checkingTask).build();
@@ -1308,10 +1308,10 @@ class ChronoTaskTest {
         this.currentExecutor = executor;
 
         final boolean[] restartResult = { true }; // Default to true, should become false
-        Consumer<ChronoTask> restartingTask = timedTask -> {
+        Consumer<ChronoTask> restartingTask = ChronoTask -> {
             this.counter.incrementAndGet();
             // Try to start while already running
-            restartResult[0] = timedTask.start();
+            restartResult[0] = ChronoTask.start();
         };
 
         ChronoTask timer = executor.createTask(restartingTask).build();
@@ -1333,7 +1333,7 @@ class ChronoTaskTest {
     void testTaskSelfStopRaceCondition(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
-        Consumer<ChronoTask> selfStoppingTask = timedTask -> {
+        Consumer<ChronoTask> selfStoppingTask = ChronoTask -> {
             this.counter.incrementAndGet();
             try {
                 Thread.sleep(100); // Give external thread time to also call stop()
@@ -1341,7 +1341,7 @@ class ChronoTaskTest {
             catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
-            timedTask.stop(); // Task stops itself
+            ChronoTask.stop(); // Task stops itself
         };
 
         ChronoTaskBuilder builder = executor.createTask(selfStoppingTask);
@@ -1704,15 +1704,15 @@ class ChronoTaskTest {
             }
         };
 
-        var timedTask = executor.createTask(longTask).build();
-        timedTask.start();
+        var ChronoTask = executor.createTask(longTask).build();
+        ChronoTask.start();
         Thread.sleep(50); // Wait for task to start
         assertEquals(1, this.counter.get(), "Task should have started");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(9500);
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(1000);
-        assertEquals(State.STOPPED, timedTask.getState());
+        assertEquals(State.STOPPED, ChronoTask.getState());
         assertEquals(2, this.counter.get(), "Task should have started");
     }
 
@@ -1811,27 +1811,27 @@ class ChronoTaskTest {
             }
         };
 
-        var timedTask = executor.createTask(longTask).build();
+        var ChronoTask = executor.createTask(longTask).build();
 
-        timedTask.start();
+        ChronoTask.start();
         Thread.sleep(50); // Wait for task to start executing
         assertEquals(1, this.counter.get(), "Task should be executing");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertEquals(State.RUNNING, ChronoTask.getState());
 
         // Stop while task is executing
-        timedTask.stop();
-        assertEquals(State.SHUTDOWN, timedTask.getState());
+        ChronoTask.stop();
+        assertEquals(State.SHUTDOWN, ChronoTask.getState());
 
         Thread.sleep(2100); // Wait for task to finish
         long countAfterStop = this.counter.get();
 
         // Restart
-        assertTrue(timedTask.start(), "Should be able to restart");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start(), "Should be able to restart");
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(50);
         assertTrue(this.counter.get() > countAfterStop, "Counter should increment after restart");
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -1842,22 +1842,22 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testRestartImmediatelyAfterStop(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
-        var timedTask = executor.createTask(createTask(0)).build();
+        var ChronoTask = executor.createTask(createTask(0)).build();
 
         // First start
-        timedTask.start();
+        ChronoTask.start();
         Thread.sleep(50);
         long firstCount = this.counter.get();
         assertTrue(firstCount >= 1, "Should have at least 1 execution");
 
         // immediately restart
-        assertTrue(timedTask.start(), "Immediate restart should succeed");
-        assertEquals(State.RUNNING, timedTask.getState());
+        assertTrue(ChronoTask.start(), "Immediate restart should succeed");
+        assertEquals(State.RUNNING, ChronoTask.getState());
         Thread.sleep(50);
         long secondCount = this.counter.get();
         assertTrue(secondCount > firstCount, "Should have more executions after restart");
 
-        timedTask.stop();
+        ChronoTask.stop();
     }
 
     /**
@@ -1897,8 +1897,7 @@ class ChronoTaskTest {
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
-    void testStopInterruptsTimerThreadDuringSleep(final AbstractExecutor executor)
-            throws InterruptedException {
+    void testStopInterruptsTimerThreadDuringSleep(final AbstractExecutor executor) throws InterruptedException {
         this.currentExecutor = executor;
 
         // instant task, 60-second repetitive delay — after first execution the timer
@@ -1920,6 +1919,136 @@ class ChronoTaskTest {
         assertTrue(elapsed < 500, "stop() should return promptly (< 500ms), but took " + elapsed + "ms");
     }
 
+    /**
+     * Tests that setMaxConcurrentExecutions(2) bounds overlapping periodic
+     * executions to exactly 2 concurrent invocations when the task duration is
+     * much longer than the periodic delay.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testMaxConcurrentExecutionsThrottlesOverlap(final AbstractExecutor executor) throws InterruptedException {
+        this.currentExecutor = executor;
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicInteger peak = new AtomicInteger(0);
+        ChronoTaskBuilder builder = executor.createTask(createThrottleTrackingTask(500, inFlight, peak));
+        builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(2);
+        ChronoTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(1200);
+        timer.stop();
+
+        assertTrue(peak.get() <= 2, "Peak concurrent executions should never exceed the configured limit of 2");
+        assertTrue(peak.get() >= 2, "Peak concurrent executions should actually reach 2 (bounded overlap)");
+    }
+
+    /**
+     * Tests that setMaxConcurrentExecutions(1) fully serializes periodic
+     * executions, equivalent to no overlap at all.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testMaxConcurrentExecutionsSerializesWhenSetToOne(final AbstractExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicInteger peak = new AtomicInteger(0);
+        ChronoTaskBuilder builder = executor.createTask(createThrottleTrackingTask(300, inFlight, peak));
+        builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(1);
+        ChronoTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(1000);
+        timer.stop();
+
+        assertEquals(1, peak.get(), "Peak concurrent executions should be exactly 1 when the limit is 1");
+    }
+
+    /**
+     * Tests that periodic executions overlap without bound by default (no
+     * setMaxConcurrentExecutions() call), locking in the intentional
+     * overlap-by-default behavior.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testMaxConcurrentExecutionsDefaultAllowsUnboundedOverlap(final AbstractExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        AtomicInteger inFlight = new AtomicInteger(0);
+        AtomicInteger peak = new AtomicInteger(0);
+        ChronoTaskBuilder builder = executor.createTask(createThrottleTrackingTask(1000, inFlight, peak));
+        builder.setPeriodicDelay(Duration.ofMillis(300));
+        ChronoTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(900);
+        timer.stop();
+
+        assertTrue(peak.get() > 1, "Overlap should occur by default without an explicit throttle");
+    }
+
+    /**
+     * Tests that setMaxConcurrentExecutions() rejects zero and negative values.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testSetMaxConcurrentExecutionsRejectsInvalidValue(final AbstractExecutor executor) {
+        this.currentExecutor = executor;
+        ChronoTaskBuilder builder = executor.createTask(createTask(0));
+
+        assertThrowsExactly(IllegalArgumentException.class, () -> builder.setMaxConcurrentExecutions(0));
+        assertThrowsExactly(IllegalArgumentException.class, () -> builder.setMaxConcurrentExecutions(-1));
+    }
+
+    /**
+     * Tests that setMaxConcurrentExecutions() returns false when the task is
+     * already running.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testSetMaxConcurrentExecutionsReturnsFalseWhenRunning(final AbstractExecutor executor)
+            throws InterruptedException {
+        this.currentExecutor = executor;
+        ChronoTaskBuilder builder = executor.createTask(createTask(1));
+        builder.setPeriodicDelay(Duration.ofSeconds(10));
+        ChronoTask timer = builder.build();
+
+        timer.start();
+        Thread.sleep(150);
+
+        assertFalse(timer.setMaxConcurrentExecutions(3),
+                "setMaxConcurrentExecutions() should return false while the task is running");
+
+        timer.stop();
+    }
+
+    /**
+     * Tests that stop() promptly unblocks a timer thread waiting on the
+     * throttle's acquire() call, avoiding a hang.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testStopWhileBlockedOnThrottle(final AbstractExecutor executor) throws InterruptedException {
+        this.currentExecutor = executor;
+        ChronoTaskBuilder builder = executor.createTask(createTask(2)); // 2-second task
+        builder.setPeriodicDelay(Duration.ofMillis(100)).setMaxConcurrentExecutions(1);
+        ChronoTask timer = builder.build();
+
+        timer.start();
+        // First execution starts immediately and holds the single permit; the timer
+        // thread will block on acquire() for the next firing shortly after.
+        Thread.sleep(300);
+
+        timer.stop();
+
+        long deadline = System.currentTimeMillis() + 3000;
+        while ((timer.getState() != State.STOPPED) && (System.currentTimeMillis() < deadline)) {
+            Thread.sleep(20);
+        }
+
+        assertEquals(State.STOPPED, timer.getState(), "Task should reach STOPPED promptly, not hang, after stop()");
+    }
+
     // ========== Helper Methods ==========
 
     private Consumer<ChronoTask> createTask(final int seconds) {
@@ -1930,6 +2059,27 @@ class ChronoTaskTest {
             }
             catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
+            }
+        };
+    }
+
+    /**
+     * Creates a task that tracks the number of concurrently in-flight executions,
+     * recording the highest concurrency level observed in {@code peak}.
+     */
+    private Consumer<ChronoTask> createThrottleTrackingTask(final long durationMillis, final AtomicInteger inFlight,
+            final AtomicInteger peak) {
+        return _ -> {
+            int current = inFlight.incrementAndGet();
+            peak.updateAndGet(p -> Math.max(p, current));
+            try {
+                Thread.sleep(durationMillis);
+            }
+            catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            finally {
+                inFlight.decrementAndGet();
             }
         };
     }

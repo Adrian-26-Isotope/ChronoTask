@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 
 /**
@@ -24,10 +25,11 @@ public class ChronoTask {
     private final AbstractExecutor executor;
 
     /* optional fields */
-    private String name = "";
-    private Duration initialDelay;
-    private Duration periodicDelay;
-    private Duration repetitiveDelay;
+    private volatile String name = "";
+    private volatile Duration initialDelay;
+    private volatile Duration periodicDelay;
+    private volatile Duration repetitiveDelay;
+    private volatile Semaphore executionThrottle = new Semaphore(Integer.MAX_VALUE);
 
     /* internal fields */
     private long count = 0;
@@ -102,7 +104,7 @@ public class ChronoTask {
      * @param name optional name for tasks
      * @return false, if called in RUNNING state.
      */
-    protected boolean setName(final String name) {
+    protected synchronized boolean setName(final String name) {
         if (!isRunning()) {
             this.name = name;
             return true;
@@ -152,7 +154,7 @@ public class ChronoTask {
      * @param delay the initial delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setInitialDelay(final Duration delay) {
+    protected synchronized boolean setInitialDelay(final Duration delay) {
         if (!isRunning()) {
             this.initialDelay = delay;
             return true;
@@ -164,7 +166,7 @@ public class ChronoTask {
      * @param repeatDelay the repetitive delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setRepetitiveDelay(final Duration repeatDelay) {
+    protected synchronized boolean setRepetitiveDelay(final Duration repeatDelay) {
         if (!isRunning()) {
             this.repetitiveDelay = repeatDelay;
             return true;
@@ -176,9 +178,25 @@ public class ChronoTask {
      * @param periodDelay the periodic delay to set
      * @return false, if called in RUNNING state.
      */
-    protected boolean setPeriodicDelay(final Duration periodDelay) {
+    protected synchronized boolean setPeriodicDelay(final Duration periodDelay) {
         if (!isRunning()) {
             this.periodicDelay = periodDelay;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Bounds how many executions of this task may run concurrently. Only relevant
+     * in periodic mode, where a slow task can otherwise overlap with subsequent
+     * firings; defaults to unbounded ({@link Integer#MAX_VALUE}).
+     *
+     * @param max the maximum number of concurrent executions to allow
+     * @return false, if called in RUNNING state.
+     */
+    protected synchronized boolean setMaxConcurrentExecutions(final int max) {
+        if (!isRunning()) {
+            this.executionThrottle = new Semaphore(max);
             return true;
         }
         return false;
@@ -216,8 +234,10 @@ public class ChronoTask {
                 LocalDateTime next;
                 while (isAlive() && ((next = getNextExecution()) != null)) {
                     if (next.compareTo(LocalDateTime.now()) <= 0) {
+                        Semaphore throttle = ChronoTask.this.executionThrottle;
+                        throttle.acquire();
                         calculatePeriodicExecutionTime(next);
-                        executeTask();
+                        executeTask(throttle);
                     }
                     waitTillNextExecution();
                 }
@@ -231,7 +251,7 @@ public class ChronoTask {
             return isRunning() && !Thread.currentThread().isInterrupted();
         }
 
-        private void executeTask() {
+        private void executeTask(final Semaphore throttle) {
             Runnable task = () -> {
                 try {
                     ChronoTask.this.task.accept(ChronoTask.this);
@@ -242,6 +262,7 @@ public class ChronoTask {
                 }
                 finally {
                     calculateRepetitiveExecutionTime();
+                    throttle.release();
                 }
             };
 
@@ -279,7 +300,7 @@ public class ChronoTask {
             }
             else if (ChronoTask.this.periodicDelay == null) {
                 // SINGLE TASK EXECUTION SCENARIO
-                stop();
+                stop(); // stop TimedTask!
             }
         }
 

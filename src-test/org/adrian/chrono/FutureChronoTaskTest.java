@@ -39,9 +39,9 @@ class FutureChronoTaskTest {
      * Provides both executor implementations for parameterized tests.
      */
     static Stream<Arguments> executorProvider() {
-        return Stream.of(Arguments.of(new ThreadExecutor()),
-                Arguments.of(new PoolExecutor(ElasticThreadPool.builder().setMinThreads(0)
-                        .setIdleTime(Duration.ofSeconds(2)).setName("test-pool").build())));
+        return Stream.of(Arguments.of(new ThreadExecutor()), Arguments.of(new PoolExecutor(ElasticThreadPool.builder()
+                .setMinThreads(0).setIdleTime(Duration.ofSeconds(2)).setName("test-pool").start())));
+
     }
 
     /**
@@ -140,6 +140,48 @@ class FutureChronoTaskTest {
         assertEquals(2, second.get(1, TimeUnit.SECONDS), "Second future should hold second execution result");
 
         task.stop();
+    }
+
+    /**
+     * Tests that the future returned by start() is completed by whichever
+     * overlapping execution finishes first (completion order), not necessarily by
+     * the execution that started first. The first invocation is slow and keeps
+     * running while the second, fast invocation completes first and self-stops the
+     * task to keep the scenario deterministic.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testNextResultCompletesInFinishOrderNotStartOrder(final AbstractExecutor executor) throws Exception {
+        this.currentExecutor = executor;
+        AtomicInteger counter = new AtomicInteger(0);
+        FutureChronoTask<String> task = executor.<String>createFutureTask(self -> {
+            int n = counter.incrementAndGet();
+            if (n == 1) {
+                sleepUninterruptibly(400);
+                return "slow";
+            }
+            sleepUninterruptibly(20);
+            self.stop();
+            return "fast-" + n;
+        }).setPeriodicDelay(Duration.ofMillis(150)).build();
+
+        CompletableFuture<String> first = task.start();
+
+        assertEquals("fast-2", first.get(1, TimeUnit.SECONDS),
+                "Future from start() should be completed by the first execution to finish, not the first to start");
+
+        CompletableFuture<String> next = task.getNextResult();
+        assertEquals("slow", next.get(1, TimeUnit.SECONDS),
+                "Following future should still be completed by the slow execution once it finishes");
+    }
+
+    private static void sleepUninterruptibly(final long millis) {
+        try {
+            Thread.sleep(millis);
+        }
+        catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -376,5 +418,31 @@ class FutureChronoTaskTest {
 
         Boolean isRunning = task.start().get(1, TimeUnit.SECONDS);
         assertTrue(isRunning, "Task should report isRunning() == true during execution");
+    }
+
+    /**
+     * Tests the setMaxConcurrentExecutions() passthrough: builder validation
+     * rejects invalid values, and the instance method returns false while
+     * running. Future/result correctness under overlap is out of scope here.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testSetMaxConcurrentExecutionsPassthrough(final AbstractExecutor executor) throws InterruptedException {
+        this.currentExecutor = executor;
+
+        assertThrows(IllegalArgumentException.class,
+                () -> executor.createFutureTask(_ -> 1).setMaxConcurrentExecutions(0));
+        assertThrows(IllegalArgumentException.class,
+                () -> executor.createFutureTask(_ -> 1).setMaxConcurrentExecutions(-1));
+
+        FutureChronoTask<Integer> task =
+                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
+        task.start();
+        Thread.sleep(150);
+
+        assertFalse(task.setMaxConcurrentExecutions(2),
+                "setMaxConcurrentExecutions() should return false while the task is running");
+
+        task.stop();
     }
 }

@@ -11,7 +11,7 @@ import java.util.function.Consumer;
  * A timer with the ability to run a single task. This task can be schedules
  * periodically, repetitively or once with a initial delay.
  */
-public class ChronoTask {
+public class ChronoTask extends AbstractChronoTask {
 
     @SuppressWarnings("javadoc")
     protected enum State {
@@ -100,10 +100,7 @@ public class ChronoTask {
         }
     }
 
-    /**
-     * @param name optional name for tasks
-     * @return false, if called in RUNNING state.
-     */
+    @Override
     protected synchronized boolean setName(final String name) {
         if (!isRunning()) {
             this.name = name;
@@ -150,10 +147,7 @@ public class ChronoTask {
         }
     }
 
-    /**
-     * @param delay the initial delay to set
-     * @return false, if called in RUNNING state.
-     */
+    @Override
     protected synchronized boolean setInitialDelay(final Duration delay) {
         if (!isRunning()) {
             this.initialDelay = delay;
@@ -162,10 +156,7 @@ public class ChronoTask {
         return false;
     }
 
-    /**
-     * @param repeatDelay the repetitive delay to set
-     * @return false, if called in RUNNING state.
-     */
+    @Override
     protected synchronized boolean setRepetitiveDelay(final Duration repeatDelay) {
         if (!isRunning()) {
             this.repetitiveDelay = repeatDelay;
@@ -174,10 +165,7 @@ public class ChronoTask {
         return false;
     }
 
-    /**
-     * @param periodDelay the periodic delay to set
-     * @return false, if called in RUNNING state.
-     */
+    @Override
     protected synchronized boolean setPeriodicDelay(final Duration periodDelay) {
         if (!isRunning()) {
             this.periodicDelay = periodDelay;
@@ -186,14 +174,7 @@ public class ChronoTask {
         return false;
     }
 
-    /**
-     * Bounds how many executions of this task may run concurrently. Only relevant
-     * in periodic mode, where a slow task can otherwise overlap with subsequent
-     * firings; defaults to unbounded ({@link Integer#MAX_VALUE}).
-     *
-     * @param max the maximum number of concurrent executions to allow
-     * @return false, if called in RUNNING state.
-     */
+    @Override
     protected synchronized boolean setMaxConcurrentExecutions(final int max) {
         if (!isRunning()) {
             this.executionThrottle = new Semaphore(max);

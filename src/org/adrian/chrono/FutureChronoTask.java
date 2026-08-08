@@ -23,7 +23,7 @@ import java.util.function.Function;
  *
  * @param <T> the type of the result produced by the task.
  */
-public class FutureChronoTask<T> {
+public class FutureChronoTask<T> extends AbstractChronoTask {
 
     private final ChronoTask chronoTask;
     private final AtomicReference<CompletableFuture<T>> nextResult;
@@ -125,53 +125,27 @@ public class FutureChronoTask<T> {
         return this.nextResult.get();
     }
 
-    /**
-     * @param delay the initial delay before the first execution; ignored when
-     *            negative
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setInitialDelay(final Duration delay) {
         return this.chronoTask.setInitialDelay(delay);
     }
 
-    /**
-     * Periodic delay means the task executes at fixed intervals from the start
-     * time. Clears any repetitive delay.
-     *
-     * @param delay the fixed delay between task executions
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setPeriodicDelay(final Duration delay) {
         return this.chronoTask.setPeriodicDelay(delay);
     }
 
-    /**
-     * Repetitive delay means the task executes with a fixed delay after the
-     * previous execution completes. Clears any periodic delay.
-     *
-     * @param delay the delay between consecutive task executions
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setRepetitiveDelay(final Duration delay) {
         return this.chronoTask.setRepetitiveDelay(delay);
     }
 
-    /**
-     * @param name the name of the task
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setName(final String name) {
         return this.chronoTask.setName(name);
     }
 
-    /**
-     * Bounds how many executions of this task may run concurrently. Only relevant
-     * in periodic mode, where a slow task can otherwise overlap with subsequent
-     * firings; defaults to unbounded ({@link Integer#MAX_VALUE}).
-     *
-     * @param max the maximum number of concurrent executions to allow
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setMaxConcurrentExecutions(final int max) {
         return this.chronoTask.setMaxConcurrentExecutions(max);
     }

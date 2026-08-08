@@ -43,8 +43,7 @@ class SystemTest {
         }).build();
         task.start();
 
-        assertTrue(latch.await(2, TimeUnit.SECONDS),
-                "uncaught exception handler should be invoked for ThreadExecutor");
+        assertTrue(latch.await(2, TimeUnit.SECONDS), "uncaught exception handler should be invoked for ThreadExecutor");
         assertNotNull(caught.get());
         assertEquals("boom-thread", caught.get().getMessage());
     }
@@ -118,7 +117,7 @@ class SystemTest {
         ChronoTaskBuilder builder = executor.createTask(_ -> {});
         builder.setInitialDelay(original);
 
-        Field field = ChronoTaskBuilder.class.getDeclaredField("initialDelay");
+        Field field = AbstractTaskBuilder.class.getDeclaredField("initialDelay");
         field.setAccessible(true);
         Duration stored = (Duration) field.get(builder);
 

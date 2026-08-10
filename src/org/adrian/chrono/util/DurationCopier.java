@@ -1,4 +1,4 @@
-package org.adrian.chrono;
+package org.adrian.chrono.util;
 
 import java.time.Duration;
 
@@ -9,7 +9,7 @@ import java.time.Duration;
  * does not actually decouple the stored value from caller-supplied input.
  * This helper guarantees a genuinely new instance instead.
  */
-final class DurationCopier {
+public final class DurationCopier {
 
     private DurationCopier() {}
 
@@ -21,7 +21,7 @@ final class DurationCopier {
      * @param duration the duration to copy.
      * @return a new {@link Duration} instance equal to {@code duration}.
      */
-    static Duration copyOf(final Duration duration) {
+    public static Duration copyOf(final Duration duration) {
         return Duration.ofSeconds(duration.getSeconds(), duration.getNano());
     }
 }

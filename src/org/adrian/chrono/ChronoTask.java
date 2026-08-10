@@ -1,17 +1,23 @@
 package org.adrian.chrono;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Objects;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
+import org.adrian.chrono.util.MonotonicClock;
 
 /**
  * A timer with the ability to run a single task. This task can be schedules
  * periodically, repetitively or once with a initial delay.
  */
 public class ChronoTask extends AbstractChronoTask {
+
+    private static final MonotonicClock MONOTONIC_CLOCK = new MonotonicClock(ZoneId.systemDefault());
 
     @SuppressWarnings("javadoc")
     protected enum State {
@@ -27,14 +33,13 @@ public class ChronoTask extends AbstractChronoTask {
     /* optional fields */
     private volatile String name = "";
     private volatile Duration initialDelay;
-    private volatile Duration periodicDelay;
-    private volatile Duration repetitiveDelay;
-    private volatile Semaphore executionThrottle = new Semaphore(Integer.MAX_VALUE);
+    private final AtomicReference<Schedule> schedule = new AtomicReference<>(new Schedule.OneShot());
+    private final AtomicReference<Semaphore> executionThrottle = new AtomicReference<>(new Semaphore(1000));
 
     /* internal fields */
     private long count = 0;
     private final Timer timer = new Timer();
-    private volatile LocalDateTime nextExecution;
+    private volatile Instant nextExecution;
     private volatile State state = State.STOPPED;
     private final Object executionLock = new Object();
 
@@ -55,7 +60,7 @@ public class ChronoTask extends AbstractChronoTask {
             try {
                 wait();
             }
-            catch (InterruptedException e) {
+            catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return false;
             }
@@ -63,7 +68,7 @@ public class ChronoTask extends AbstractChronoTask {
 
         if (getState() == State.STOPPED) {
             setState(State.RUNNING);
-            setNextExecutionTime(LocalDateTime.now().plus(this.initialDelay));
+            setNextExecutionTime(Instant.now(MONOTONIC_CLOCK).plus(this.initialDelay));
             try {
                 if ((this.name == null) || this.name.isBlank()) {
                     this.executor.run(this.timer::runTimer);
@@ -73,7 +78,7 @@ public class ChronoTask extends AbstractChronoTask {
                     this.executor.run(this.timer::runTimer, timerName);
                 }
             }
-            catch (RejectedExecutionException e) {
+            catch (RejectedExecutionException _) {
                 // submission was dropped/rejected: roll back so the task cannot get stuck.
                 setState(State.STOPPED);
                 setNextExecutionTime(null);
@@ -133,14 +138,14 @@ public class ChronoTask extends AbstractChronoTask {
     /**
      * @return the time the next execution shall be triggered.
      */
-    protected LocalDateTime getNextExecution() {
+    protected Instant getNextExecution() {
         return this.nextExecution;
     }
 
     /**
      * set the new next execution time.
      */
-    protected void setNextExecutionTime(final LocalDateTime time) {
+    protected void setNextExecutionTime(final Instant time) {
         synchronized (this.executionLock) {
             this.nextExecution = time;
             this.executionLock.notifyAll();
@@ -157,18 +162,9 @@ public class ChronoTask extends AbstractChronoTask {
     }
 
     @Override
-    protected synchronized boolean setRepetitiveDelay(final Duration repeatDelay) {
+    protected synchronized boolean setSchedule(final Schedule schedule) {
         if (!isRunning()) {
-            this.repetitiveDelay = repeatDelay;
-            return true;
-        }
-        return false;
-    }
-
-    @Override
-    protected synchronized boolean setPeriodicDelay(final Duration periodDelay) {
-        if (!isRunning()) {
-            this.periodicDelay = periodDelay;
+            this.schedule.set(Objects.requireNonNull(schedule));
             return true;
         }
         return false;
@@ -177,7 +173,7 @@ public class ChronoTask extends AbstractChronoTask {
     @Override
     protected synchronized boolean setMaxConcurrentExecutions(final int max) {
         if (!isRunning()) {
-            this.executionThrottle = new Semaphore(max);
+            this.executionThrottle.set(new Semaphore(max));
             return true;
         }
         return false;
@@ -188,7 +184,7 @@ public class ChronoTask extends AbstractChronoTask {
      */
     private class Timer {
 
-        private volatile Thread timerThread;
+        private Thread timerThread;
 
         private void runTimer() {
             this.timerThread = Thread.currentThread();
@@ -212,13 +208,13 @@ public class ChronoTask extends AbstractChronoTask {
 
         private void loopTimer() {
             try {
-                LocalDateTime next;
+                Instant next;
                 while (isAlive() && ((next = getNextExecution()) != null)) {
-                    if (next.compareTo(LocalDateTime.now()) <= 0) {
-                        Semaphore throttle = ChronoTask.this.executionThrottle;
+                    if (next.compareTo(Instant.now(MONOTONIC_CLOCK)) <= 0) {
+                        Semaphore throttle = ChronoTask.this.executionThrottle.get();
                         throttle.acquire();
-                        calculatePeriodicExecutionTime(next);
-                        executeTask(throttle);
+                        Instant deferredNext = setNextPeriodicExecutionTime(next);
+                        executeTask(throttle, deferredNext == null);
                     }
                     waitTillNextExecution();
                 }
@@ -232,8 +228,8 @@ public class ChronoTask extends AbstractChronoTask {
             return isRunning() && !Thread.currentThread().isInterrupted();
         }
 
-        private void executeTask(final Semaphore throttle) {
-            Runnable task = () -> {
+        private void executeTask(final Semaphore throttle, final boolean deferred) {
+            Runnable runnable = () -> {
                 try {
                     ChronoTask.this.task.accept(ChronoTask.this);
                 }
@@ -242,46 +238,36 @@ public class ChronoTask extends AbstractChronoTask {
                     current.getUncaughtExceptionHandler().uncaughtException(current, e);
                 }
                 finally {
-                    calculateRepetitiveExecutionTime();
+                    if (deferred) {
+                        setNextRepetetiveExecutionTime();
+                    }
                     throttle.release();
                 }
             };
 
             if ((ChronoTask.this.name == null) || ChronoTask.this.name.isBlank()) {
-                ChronoTask.this.executor.run(task);
+                ChronoTask.this.executor.run(runnable);
             }
             else {
                 String taskName = "[" + ChronoTask.this.name + "]Task#" + (++ChronoTask.this.count);
-                ChronoTask.this.executor.run(task, taskName);
+                ChronoTask.this.executor.run(runnable, taskName);
             }
 
         }
 
-        /**
-         * only with periodic scenario: calculate the next execution time.
-         */
-        private void calculatePeriodicExecutionTime(final LocalDateTime currentExecutionTime) {
-            if (ChronoTask.this.periodicDelay != null) {
-                setNextExecutionTime(currentExecutionTime.plus(ChronoTask.this.periodicDelay));
+        private Instant setNextPeriodicExecutionTime(final Instant next) {
+            Instant deferredNext = ChronoTask.this.schedule.get().afterDispatch(next);
+            setNextExecutionTime(deferredNext);
+            return deferredNext;
+        }
+
+        private void setNextRepetetiveExecutionTime() {
+            Instant next = ChronoTask.this.schedule.get().afterCompletion(Instant.now(MONOTONIC_CLOCK));
+            if (next == null) {
+                stop();
             }
             else {
-                // set next execution to null temporarily.
-                // once the task finishes it will set the next execution with the repetitive
-                // delay.
-                setNextExecutionTime(null);
-            }
-        }
-
-        /**
-         * only for repetitive scenario: set the next execution time.
-         */
-        private void calculateRepetitiveExecutionTime() {
-            if (ChronoTask.this.repetitiveDelay != null) {
-                setNextExecutionTime(LocalDateTime.now().plus(ChronoTask.this.repetitiveDelay));
-            }
-            else if (ChronoTask.this.periodicDelay == null) {
-                // SINGLE TASK EXECUTION SCENARIO
-                stop(); // stop TimedTask!
+                setNextExecutionTime(next);
             }
         }
 
@@ -296,7 +282,7 @@ public class ChronoTask extends AbstractChronoTask {
                 }
             }
             else {
-                Duration duration = Duration.between(LocalDateTime.now(), getNextExecution());
+                Duration duration = Duration.between(Instant.now(MONOTONIC_CLOCK), getNextExecution());
                 if (!duration.isNegative()) {
                     Thread.sleep(duration);
                 }
@@ -305,7 +291,7 @@ public class ChronoTask extends AbstractChronoTask {
             }
         }
 
-        private void interruptTimerThread() {
+        private synchronized void interruptTimerThread() {
             if (this.timerThread != null) {
                 this.timerThread.interrupt();
             }

@@ -131,13 +131,8 @@ public class FutureChronoTask<T> extends AbstractChronoTask {
     }
 
     @Override
-    protected boolean setPeriodicDelay(final Duration delay) {
-        return this.chronoTask.setPeriodicDelay(delay);
-    }
-
-    @Override
-    protected boolean setRepetitiveDelay(final Duration delay) {
-        return this.chronoTask.setRepetitiveDelay(delay);
+    protected boolean setSchedule(final Schedule schedule) {
+        return this.chronoTask.setSchedule(schedule);
     }
 
     @Override

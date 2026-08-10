@@ -1,6 +1,9 @@
 package org.adrian.chrono;
 
 import java.time.Duration;
+import java.util.Objects;
+
+import org.adrian.chrono.util.DurationCopier;
 
 /**
  * Common builder pattern for task configuration.
@@ -10,10 +13,9 @@ import java.time.Duration;
 abstract class AbstractTaskBuilder<B extends AbstractTaskBuilder<B>> {
 
     private String name;
-    private Duration periodicDelay = null;
-    private Duration repetitiveDelay = null;
+    private Schedule schedule = new Schedule.OneShot();
     private Duration initialDelay = Duration.ZERO;
-    private int maxConcurrentExecutions = Integer.MAX_VALUE;
+    private int maxConcurrentExecutions = 1000;
 
     private final AbstractExecutor executor;
 
@@ -50,6 +52,7 @@ abstract class AbstractTaskBuilder<B extends AbstractTaskBuilder<B>> {
      * @throws IllegalArgumentException if the given duration is negative
      */
     public B setInitialDelay(final Duration initialDelay) {
+        Objects.requireNonNull(initialDelay, "initialDelay");
         if (initialDelay.isNegative()) {
             throw new IllegalArgumentException("a negative duration is not allowed.");
         }
@@ -58,42 +61,54 @@ abstract class AbstractTaskBuilder<B extends AbstractTaskBuilder<B>> {
     }
 
     /**
+     * Sets the schedule that determines when the next execution fires. This is
+     * the primary API for configuring recurrence; it replaces any previous
+     * schedule.
+     *
+     * @param schedule the schedule to use; must not be {@code null}
+     * @return this builder instance for method chaining
+     * @throws NullPointerException if {@code schedule} is {@code null}
+     */
+    public B setSchedule(final Schedule schedule) {
+        this.schedule = Objects.requireNonNull(schedule, "schedule");
+        return self();
+    }
+
+    /**
      * Periodic delay means the task executes at fixed intervals from the start
-     * time.<br>
-     * Add a periodic delay to the scheduler. Clears the repetitive delay. The
-     * duration is decoupled from the input to prevent strong references to the
-     * external {@link Duration}.
+     * time. Clears any previous schedule.
+     * <p>
+     * The duration is decoupled from the input to prevent strong references to
+     * the external {@link Duration}.
      *
      * @param delay the fixed delay between task executions
      * @return this builder instance for method chaining
+     * @throws NullPointerException if {@code delay} is {@code null}
      * @throws IllegalArgumentException if the given duration is negative
+     * @deprecated use {@link #setSchedule(Schedule)} with {@link Schedule.Periodic}
      */
+    @Deprecated
     public B setPeriodicDelay(final Duration delay) {
-        if (delay.isNegative()) {
-            throw new IllegalArgumentException("a negative duration is not allowed.");
-        }
-        this.periodicDelay = DurationCopier.copyOf(delay);
-        this.repetitiveDelay = null;
+        this.schedule = new Schedule.Periodic(delay);
         return self();
     }
 
     /**
      * Repetitive delay means the task executes with a fixed delay after the
-     * previous execution completes.<br>
-     * Add a repetitive delay to the scheduler. Clears the periodic delay. The
-     * duration is decoupled from the input to prevent strong references to the
-     * external {@link Duration}.
+     * previous execution completes. Clears any previous schedule.
+     * <p>
+     * The duration is decoupled from the input to prevent strong references to
+     * the external {@link Duration}.
      *
      * @param delay the delay between consecutive task executions
      * @return this builder instance for method chaining
+     * @throws NullPointerException if {@code delay} is {@code null}
      * @throws IllegalArgumentException if the given duration is negative
+     * @deprecated use {@link #setSchedule(Schedule)} with {@link Schedule.Repetitive}
      */
+    @Deprecated
     public B setRepetitiveDelay(final Duration delay) {
-        if (delay.isNegative()) {
-            throw new IllegalArgumentException("a negative duration is not allowed.");
-        }
-        this.repetitiveDelay = DurationCopier.copyOf(delay);
-        this.periodicDelay = null;
+        this.schedule = new Schedule.Repetitive(delay);
         return self();
     }
 
@@ -113,7 +128,7 @@ abstract class AbstractTaskBuilder<B extends AbstractTaskBuilder<B>> {
     /**
      * Bounds how many executions of this task may run concurrently. Only relevant
      * in periodic mode, where a slow task can otherwise overlap with subsequent
-     * firings. Defaults to unbounded ({@link Integer#MAX_VALUE}).
+     * firings. Defaults to 1000.
      *
      * @param max the maximum number of concurrent executions to allow
      * @return this builder instance for method chaining
@@ -137,8 +152,7 @@ abstract class AbstractTaskBuilder<B extends AbstractTaskBuilder<B>> {
             task.setName(this.name);
         }
         task.setInitialDelay(this.initialDelay);
-        task.setPeriodicDelay(this.periodicDelay);
-        task.setRepetitiveDelay(this.repetitiveDelay);
+        task.setSchedule(this.schedule);
         task.setMaxConcurrentExecutions(this.maxConcurrentExecutions);
     }
 }

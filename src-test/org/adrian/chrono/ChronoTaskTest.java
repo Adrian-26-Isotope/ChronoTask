@@ -55,11 +55,11 @@ class ChronoTaskTest {
     @MethodSource("executorProvider")
     void testState(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        var ChronoTask = executor.createTask(createTask(1)).build();
-        ChronoTask.start();
-        assertEquals(State.RUNNING, ChronoTask.getState());
-        ChronoTask.stop();
-        assertEquals(State.SHUTDOWN, ChronoTask.getState());
+        var chronoTask = executor.createTask(createTask(1)).build();
+        chronoTask.start();
+        assertEquals(State.RUNNING, chronoTask.getState());
+        chronoTask.stop();
+        assertEquals(State.SHUTDOWN, chronoTask.getState());
     }
 
     @ParameterizedTest
@@ -1005,7 +1005,7 @@ class ChronoTaskTest {
 
         Consumer<ChronoTask> exceptionTask = _ -> {
             this.counter.incrementAndGet();
-            throw new IllegalStateException("Test runtime exception");
+            throw new IllegalStateException("expected test runtime exception");
         };
 
         ChronoTaskBuilder builder = executor.createTask(exceptionTask);

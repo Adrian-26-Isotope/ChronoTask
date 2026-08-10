@@ -117,9 +117,9 @@ task.start();  // Restart - same configuration
 - No built-in support for one-time execution with initial delay followed by different scheduling
 
 **ChronoTask**:
-- **Periodic mode** (via `setPeriodicDelay()`): Similar to `scheduleAtFixedRate()` - schedules next execution at fixed intervals from the start time, **regardless of task execution duration**
-- **Repetitive mode** (via `setRepetitiveDelay()`): Similar to `scheduleWithFixedDelay()` - waits for task completion before scheduling next execution with the specified delay
-- **One-time mode**: When neither periodic nor repetitive delay is set, task executes once after initial delay
+- **Periodic mode** (via `setSchedule(new Schedule.Periodic(...))`): Similar to `scheduleAtFixedRate()` - schedules next execution at fixed intervals from the start time, **regardless of task execution duration**
+- **Repetitive mode** (via `setSchedule(new Schedule.Repetitive(...))`): Similar to `scheduleWithFixedDelay()` - waits for task completion before scheduling next execution with the specified delay
+- **One-time mode** (via `setSchedule(new Schedule.OneShot())`, the default): When neither periodic nor repetitive delay is set, task executes once after initial delay
 - All modes support optional `setInitialDelay()` for consistent delayed start behavior
 - Mode is configuration-based rather than method-based
 
@@ -127,16 +127,16 @@ task.start();  // Restart - same configuration
 // Periodic: Fixed-rate execution
 ChronoTask periodic = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
-    .setPeriodicDelay(Duration.ofSeconds(10))
+    .setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
     .build();
 
 // Repetitive: Fixed-delay execution
 ChronoTask repetitive = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
-    .setRepetitiveDelay(Duration.ofSeconds(10))
+    .setSchedule(new Schedule.Repetitive(Duration.ofSeconds(10)))
     .build();
 
-// One-time: Single execution after delay
+// One-time: Single execution after delay (Schedule.OneShot is the default)
 ChronoTask oneTime = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
     .build();
@@ -344,11 +344,10 @@ The `ChronoTask` class is the central component representing an individual sched
   - `SHUTDOWN`: Transitional state — `stop()` has been called; timer thread is winding down
   - `STOPPED`: Task is fully stopped
 
-- **Timing Configuration**: Holds three optional `Duration` fields:
+- **Timing Configuration**: Holds an `initialDelay` (`Duration`) and a `Schedule` that determines the recurrence policy:
   - `initialDelay`: Delay before the first execution
-  - `periodicDelay`: Fixed-rate interval between execution starts (scheduled at fixed intervals)
-  - `repetitiveDelay`: Fixed-delay interval after execution completion
-  - `maxConcurrentExecutions`: Bounds concurrent overlap in periodic mode (default unbounded); see `setMaxConcurrentExecutions()`
+  - `schedule`: A sealed `Schedule` type — `Schedule.Periodic` (fixed-rate), `Schedule.Repetitive` (fixed-delay), or `Schedule.OneShot` (single execution, the default). The schedule encapsulates the next-execution-time policy and is mutually exclusive by construction.
+  - `maxConcurrentExecutions`: Bounds concurrent overlap in periodic mode (default 1000); see `setMaxConcurrentExecutions()`
 
 - **Internal Timer**: Contains a nested `Timer` class that manages the scheduling logic on a dedicated timer thread.
 
@@ -365,8 +364,8 @@ The `ChronoTask` class is the central component representing an individual sched
 The `ChronoTaskBuilder` class implements the Builder pattern for fluent, type-safe task configuration. It:
 
 - **Enforces Required Parameters**: Mandates `Consumer<ChronoTask>` task and `AbstractExecutor` at construction
-- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`, `setMaxConcurrentExecutions()`)
-- **Validates Configuration**: Ensures mutually exclusive execution modes (periodic vs. repetitive)
+- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setSchedule()`, `setName()`, `setMaxConcurrentExecutions()`)
+- **Validates Configuration**: Ensures a valid, non-null `Schedule` (mutual exclusion is guaranteed by construction — one field, one type)
 - **Prevents Memory Leaks**: Creates defensive copies of all `Duration` and `String` parameters to decouple from external references
 - **Builds Immutable Tasks**: Constructs fully configured `ChronoTask` instances via `build()`
 

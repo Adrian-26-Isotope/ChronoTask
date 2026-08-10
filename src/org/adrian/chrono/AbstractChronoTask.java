@@ -28,21 +28,12 @@ abstract class AbstractChronoTask {
     protected abstract boolean setName(final String name);
 
     /**
-     * Periodic delay means the task executes at fixed intervals from the start
-     * time. Clears any repetitive delay.
+     * Sets the schedule that determines when the next execution fires. Replaces
+     * any previous schedule.
      *
-     * @param delay the fixed delay between task executions
+     * @param schedule the schedule to use
      * @return false if the task is currently running
      */
-    protected abstract boolean setPeriodicDelay(final Duration delay);
-
-    /**
-     * Repetitive delay means the task executes with a fixed delay after the
-     * previous execution completes. Clears any periodic delay.
-     *
-     * @param delay the delay between consecutive task executions
-     * @return false if the task is currently running
-     */
-    protected abstract boolean setRepetitiveDelay(final Duration delay);
+    protected abstract boolean setSchedule(final Schedule schedule);
 
 }

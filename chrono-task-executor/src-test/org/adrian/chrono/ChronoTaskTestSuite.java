@@ -8,7 +8,7 @@ import org.junit.platform.suite.api.Suite;
  *
  */
 @Suite
-@SelectClasses({ ChronoTaskTest.class, FutureChronoTaskTest.class, ScheduleTest.class, SystemTest.class })
+@SelectClasses({ ChronoTaskTest.class, FutureChronoTaskTest.class, SystemTest.class })
 public class ChronoTaskTestSuite {
 
 }

@@ -36,7 +36,7 @@ The library supports three execution modes: one-time with optional initial delay
 
 - **Three Execution Modes**: Supports one-time execution with optional initial delay, periodic (fixed-rate) execution, and repetitive (fixed-delay) execution to cover different scheduling scenarios.
 
-- **Flexible Executor Options**: Provide your own `AbstractExecutor` implementation for full control how tasks shall be executed, or choose between 2 built-in executors:
+- **Flexible Executor Options**: Provide your own `AbstractExecutor` implementation for full control how tasks shall be executed, or choose between 2 built-in executors (available in the `chrono-task-executor` module):
   -  `ThreadExecutor` for individual thread execution (using virtual threads by default) or
   -  `PoolExecutor` for efficient thread pool-based execution.
 
@@ -2124,14 +2124,39 @@ ChronoTask task = executor.createTask(t -> {
 // (immediately clear what each thread does!)
 ```
 
+## Module Structure
+
+ChronoTask is split into two Maven modules:
+
+| Module | ArtifactId | Description | Dependencies |
+|--------|-----------|-------------|--------------|
+| Core | `chrono-task-core` | Task scheduling framework: `ChronoTask`, `FutureChronoTask`, `Schedule`, builders, `AbstractExecutor` | None (pure JDK) |
+| Executor | `chrono-task-executor` | Concrete executor implementations: `ThreadExecutor`, `PoolExecutor` | `chrono-task-core`, [ElasticThreadPool](https://github.com/Adrian-26-Isotope/ElasticThreadPool) |
+
+**Using only the core module** (no external dependencies):
+
+```xml
+<dependency>
+    <groupId>org.adrian</groupId>
+    <artifactId>chrono-task-core</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+**Using the executor module** (includes `ThreadExecutor` and `PoolExecutor`):
+
+```xml
+<dependency>
+    <groupId>org.adrian</groupId>
+    <artifactId>chrono-task-executor</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
 ## Requirements
 
 - Java 25+
 - JUnit 5
-
-## Dependencies
-
-- [ElasticThreadPool](https://github.com/Adrian-26-Isotope/ElasticThreadPool) (maven dependency)
 
 ## License
 

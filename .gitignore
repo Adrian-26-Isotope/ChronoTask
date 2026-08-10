@@ -26,11 +26,11 @@ replay_pid*
 # binaries
 /bin/
 /.bin/
-/target/
+**/target/
 
 # IDE specifics
-/.settings/
-.classpath
-.project
+**/.settings/
+**/.classpath
+**/.project
 mvn-jdk25.bat
 /.mvn

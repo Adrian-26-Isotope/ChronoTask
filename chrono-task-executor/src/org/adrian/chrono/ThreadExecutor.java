@@ -1,5 +1,6 @@
 package org.adrian.chrono;
 
+import java.util.Objects;
 import java.util.concurrent.ThreadFactory;
 
 /**
@@ -13,15 +14,17 @@ import java.util.concurrent.ThreadFactory;
  */
 public class ThreadExecutor extends AbstractExecutor {
 
-    private ThreadFactory threadFactory = Thread.ofVirtual().factory();
+    private volatile ThreadFactory threadFactory = Thread.ofVirtual().factory();
 
     /**
      * Sets the thread factory to be used for creating threads to execute tasks.
      *
-     * @param threadFactory the thread factory to use for task execution
+     * @param threadFactory the thread factory to use for task execution; must
+     *                     not be {@code null}
+     * @throws NullPointerException if {@code threadFactory} is {@code null}
      */
     public void setThreadFactory(final ThreadFactory threadFactory) {
-        this.threadFactory = threadFactory;
+        this.threadFactory = Objects.requireNonNull(threadFactory, "threadFactory");
     }
 
     /**

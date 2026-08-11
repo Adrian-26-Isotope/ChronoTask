@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -146,23 +147,24 @@ class FutureChronoTaskTest {
      * Tests that the future returned by start() is completed by whichever
      * overlapping execution finishes first (completion order), not necessarily by
      * the execution that started first. The first invocation is slow and keeps
-     * running while the second, fast invocation completes first and self-stops the
-     * task to keep the scenario deterministic.
+     * running while the second, fast invocation completes first.
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
     void testNextResultCompletesInFinishOrderNotStartOrder(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureChronoTask<String> task = executor.<String>createFutureTask(self -> {
+        FutureChronoTask<String> task = executor.<String> createFutureTask(_ -> {
             int n = counter.incrementAndGet();
             if (n == 1) {
-                sleepUninterruptibly(400);
-                return "slow";
+                sleepUninterruptibly(200);
+                return "slow-" + n;
             }
-            sleepUninterruptibly(20);
-            self.stop();
-            return "fast-" + n;
+            if (n == 2) {
+                sleepUninterruptibly(20);
+                return "fast-" + n;
+            }
+            return "extra";
         }).setPeriodicDelay(Duration.ofMillis(150)).build();
 
         CompletableFuture<String> first = task.start();
@@ -171,8 +173,13 @@ class FutureChronoTaskTest {
                 "Future from start() should be completed by the first execution to finish, not the first to start");
 
         CompletableFuture<String> next = task.getNextResult();
-        assertEquals("slow", next.get(1, TimeUnit.SECONDS),
+        assertEquals("slow-1", next.get(1, TimeUnit.SECONDS),
                 "Following future should still be completed by the slow execution once it finishes");
+
+        next = task.getNextResult();
+        assertEquals("extra", next.get(1, TimeUnit.SECONDS));
+
+        task.stop();
     }
 
     private static void sleepUninterruptibly(final long millis) {
@@ -444,5 +451,26 @@ class FutureChronoTaskTest {
                 "setMaxConcurrentExecutions() should return false while the task is running");
 
         task.stop();
+    }
+
+    /**
+     * Tests that stop() cancels a pending future so a caller's get() does not
+     * hang forever.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testStopCancelsPendingFuture(final AbstractExecutor executor) throws Exception {
+        this.currentExecutor = executor;
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setInitialDelay(Duration.ofSeconds(10)).build();
+
+        CompletableFuture<Integer> future = task.start();
+        assertFalse(future.isDone(), "future should not be done before stop()");
+
+        task.stop();
+        Thread.sleep(100);
+
+        assertTrue(future.isCancelled(), "pending future should be cancelled by stop()");
+        assertThrows(CancellationException.class, () -> future.get(1, TimeUnit.SECONDS));
     }
 }

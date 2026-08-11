@@ -19,8 +19,8 @@ ChronoTask is a small, thoughtfully-documented scheduling library built on a han
 | **F8** | Medium | Architecture | `ChronoTask.Timer` in [ChronoTask.java](src/org/adrian/chrono/ChronoTask.java) | ✅ **FIXED** — Scheduling used `LocalDateTime.now()` (wall-clock) rather than a monotonic clock — vulnerable to NTP/manual clock adjustments causing execution bursts or stalls. All call sites now use a `MonotonicClock` backed by `System.nanoTime()`, which is immune to wall-clock changes. |
 | **F10** | Medium | Design | `ChronoTask`/builders | ✅ **FIXED** — "Periodic vs. repetitive vs. one-shot" modeled as two nullable, mutually-exclusive `Duration` fields (primitive obsession) instead of a sealed `Schedule` type — the invariant is enforced ad hoc in 3 places. Replaced with a sealed `Schedule` type (`Schedule.Periodic`, `Schedule.Repetitive`, `Schedule.OneShot`); mutual exclusion is now guaranteed by construction (one field, one type). `setPeriodicDelay`/`setRepetitiveDelay` retained as `@Deprecated` adapters. |
 | **F11** | Medium | Design | `ChronoTask.Timer` calculation methods | ✅ **FIXED** — Next-execution-time policy logic is buried in a private inner class also handling thread lifecycle — can't be unit-tested without a real timer thread. The policy is now expressed as polymorphic methods (`afterDispatch`/`afterCompletion`) on the `Schedule` type, directly unit-tested in `ScheduleTest` without a timer thread. |
-| **F14** | Medium | Design | [ThreadExecutor.java](src/org/adrian/chrono/ThreadExecutor.java) `threadFactory` | Not `volatile`; reconfiguring after scheduling starts has no visibility guarantee to executing threads. |
-| **F15** | Medium | Design | [FutureChronoTask.java](src/org/adrian/chrono/FutureChronoTask.java) `stop()` | Leaves any pending `CompletableFuture` permanently uncompleted with no documentation of this hang-forever behavior. |
+| **F14** | Medium | Design | [ThreadExecutor.java](src/org/adrian/chrono/ThreadExecutor.java) `threadFactory` | ✅ **FIXED** — `threadFactory` was a plain field read from timer/worker threads but written from the configuring thread — no JMM visibility guarantee, so a reconfiguration after scheduling starts may never be seen by executing threads. Field is now `volatile` (sufficient: single unconditional write needs visibility, not atomicity against a check-then-act). `setThreadFactory` now also rejects `null` with `Objects.requireNonNull` (F27 precedent) and documents the visibility contract; the injected factory is treated as an opaque, thread-safe collaborator. Regression tests added: a null-argument assertion, and a functional swap test confirming a swapped factory is used by subsequent `run(...)` invocations. |
+| **F15** | Medium | Design | [FutureChronoTask.java](src/org/adrian/chrono/FutureChronoTask.java) `stop()` | ✅ **FIXED** — Leaves any pending `CompletableFuture` permanently uncompleted with no documentation of this hang-forever behavior. `stop()` now cancels the pending future; the consumer's claim-and-complete is guarded by a `synchronized` check-then-swap that skips if the future is already done (cancelled), preventing orphan futures from `getAndSet`. `start()` installs a fresh future when the current one is already done. |
 | **F19** | Low | Architecture + Design | Both builders' `setName()` | `new String(name)` "defensive copy" is a no-op cargo-cult pattern (`String` is immutable) — provides no benefit, and the javadoc's justification is technically incorrect. |
 | **F20** | Low | Architecture | Builder constructors | Non-standard `@warning` Javadoc tag won't render correctly in generated docs. |
 | **F21** | Low | Architecture | `ChronoTask.State` enum | `@SuppressWarnings("javadoc")` used instead of documenting the enum, inconsistent with the rest of the codebase. |
@@ -33,6 +33,7 @@ ChronoTask is a small, thoughtfully-documented scheduling library built on a han
 | **F28** | Low | Security | `ChronoTask.Timer.executeTask()`, `Worker.handleTaskError()` | `getUncaughtExceptionHandler()` dereferenced without a null check — reachable only via a misbehaving custom `Thread` subclass. |
 | **F29** | Low | Concurrency | `ChronoTask.start()` | Can block the caller indefinitely (holding the instance monitor) if the injected executor doesn't execute promptly — largely theoretical given `ElasticThreadPool`'s unbounded queue. |
 | **F30** | Informational | Security | Thread naming (`PoolExecutor`, `ChronoTask`) | Task/timer names are used verbatim as thread names — a latent info-exposure concern only if names ever derive from untrusted input and get logged. |
+| **F31** | Low | Design + Concurrency | [FutureChronoTask.java](src/org/adrian/chrono/FutureChronoTask.java) / [ChronoTask.java](src/org/adrian/chrono/ChronoTask.java) `Timer.setNextRepetetiveExecutionTime()` | **Residual of F15** — When a one-shot or repetitive task self-terminates internally (via `ChronoTask.stop()` called from `Timer`'s runnable `finally` when `afterCompletion` returns `null`), `FutureChronoTask.stop()` is never called, so the orphan `CompletableFuture` installed by the last execution's `getAndSet` is neither completed nor cancelled. `getNextResult()` on such a self-terminated task without restart returns a future that hangs forever. The F15 fix only covers externally-called `FutureChronoTask.stop()`. Fully closing this would require `ChronoTask` to notify `FutureChronoTask` of internal stop (quiescence callback), which was not implemented. |
 
 ## Findings by Category
 
@@ -101,8 +102,8 @@ Class/module-level review of the chrono core and thread pool packages.
 3. **F7** — Significant duplication between `ChronoTaskBuilder` and `FutureChronoTaskBuilder`.
 4. **F10 — ✅ FIXED** — Nullable, mutually-exclusive `Duration` fields replaced with a sealed `Schedule` type; mutual exclusion is now by construction.
 5. **F11 — ✅ FIXED** — Scheduling-calculation logic pulled into the `Schedule` type's polymorphic `afterDispatch`/`afterCompletion` methods, directly unit-testable.
-6. **F14** — `ThreadExecutor.threadFactory` is not `volatile`.
-7. **F15** — `stop()` leaves a pending `CompletableFuture` permanently uncompleted, undocumented.
+6. **F14 — ✅ FIXED** — `ThreadExecutor.threadFactory` is now `volatile`; `setThreadFactory` rejects `null` and documents the visibility contract.
+7. **F15 — ✅ FIXED** — `stop()` now cancels the pending `CompletableFuture`; the consumer skips claiming an already-done future to prevent orphans.
 
 **Low**
 
@@ -118,8 +119,8 @@ Class/module-level review of the chrono core and thread pool packages.
 2. Synchronize `ChronoTask`'s configuration setters; bundle with guard-clause dedup. (F4, F24)
 3. ~~Extract a shared base for the two builders; consider a sealed `Schedule` type.~~ ✅ Fixed — `AbstractTaskBuilder` shared base + sealed `Schedule` (F7, F10)
 4. ~~Pull scheduling-calculation logic into an independently testable policy component.~~ ✅ Fixed — `Schedule.afterDispatch`/`afterCompletion` (F11)
-5. Make `ThreadExecutor.threadFactory` volatile. (F14)
-6. Decide/document `FutureChronoTask.stop()`'s contract for pending futures. (F15)
+5. ~~Make `ThreadExecutor.threadFactory` volatile.~~ ✅ Fixed — `volatile` + `Objects.requireNonNull` + visibility Javadoc (F14)
+6. ~~Decide/document `FutureChronoTask.stop()`'s contract for pending futures.~~ ✅ Fixed — `stop()` cancels pending future; consumer guards against orphans (F15)
 7. Drop the pointless `new String(name)` copy. (F19)
 8. Lower priority: consolidate `run(...)` overloads, reconsider the forwarding surface, rename `ChronoTask.State.SHUTDOWN`. (F22, F23, F25)
 

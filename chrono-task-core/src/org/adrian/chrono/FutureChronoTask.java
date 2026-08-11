@@ -47,13 +47,19 @@ public class FutureChronoTask<T> extends AbstractChronoTask {
             catch (final Exception e) {
                 failure = e;
             }
-            CompletableFuture<T> currentFuture = this.nextResult.getAndSet(new CompletableFuture<>());
-            if (failure == null) {
-                this.lastResult = result;
-                currentFuture.complete(result);
-            }
-            else {
-                currentFuture.completeExceptionally(failure);
+            synchronized (FutureChronoTask.this) {
+                CompletableFuture<T> currentFuture = FutureChronoTask.this.nextResult.get();
+                if (currentFuture.isDone()) {
+                    return;
+                }
+                FutureChronoTask.this.nextResult.set(new CompletableFuture<>());
+                if (failure == null) {
+                    FutureChronoTask.this.lastResult = result;
+                    currentFuture.complete(result);
+                }
+                else {
+                    currentFuture.completeExceptionally(failure);
+                }
             }
         };
 
@@ -63,9 +69,8 @@ public class FutureChronoTask<T> extends AbstractChronoTask {
     /**
      * Starts the task and returns the {@link CompletableFuture} for the next
      * upcoming execution. If the task was previously stopped before its prior
-     * {@code start()}'s execution ever fired, that same future instance is
-     * reused rather than replaced, since it was never completed; it will be
-     * completed by whichever execution runs next.
+     * {@code start()}'s execution ever fired, the cancelled future is replaced
+     * with a fresh one, since {@link #stop()} cancels any pending future.
      *
      * @return the future that will be completed by the next execution, or
      *         {@code null} if the task is already running or failed to start
@@ -75,16 +80,24 @@ public class FutureChronoTask<T> extends AbstractChronoTask {
             return null;
         }
         CompletableFuture<T> next = getNextResult();
+        if (next.isDone()) {
+            next = new CompletableFuture<>();
+            this.nextResult.set(next);
+        }
         boolean started = this.chronoTask.start();
         return started ? next : null;
     }
 
     /**
      * Stops any recurring executions and terminates this task gracefully. Once
-     * stopped the task can be started again via {@link #start()}.
+     * stopped the task can be started again via {@link #start()}. Any pending
+     * {@link CompletableFuture} is cancelled so that a caller waiting on
+     * {@code get()} does not hang forever; the result of an in-flight execution
+     * that has not yet claimed the future is discarded.
      */
-    public void stop() {
+    public synchronized void stop() {
         this.chronoTask.stop();
+        this.nextResult.get().cancel(false);
     }
 
     /**

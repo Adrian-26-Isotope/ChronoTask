@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.Objects;
 
 import org.adrian.chrono.util.DurationCopier;
+import org.adrian.chrono.util.ThreadNames;
 
 /**
  * Common builder pattern for task configuration.
@@ -113,15 +114,18 @@ abstract class AbstractTaskBuilder<B extends AbstractTaskBuilder<B>> {
     }
 
     /**
-     * Sets the name of the task for identification purposes. The string is
-     * decoupled from the input to not store a strong reference.
+     * Sets the name of the task for identification purposes. The name is
+     * validated via {@link ThreadNames#sanitize(String)} to reject characters
+     * outside the allow-list and names exceeding the length cap. Check
+     * {@link ThreadNames#ALLOWED} for the allow-list regex.
      *
      * @param name the name of the task.
      * @return this builder instance for method chaining.
-     * @throws NullPointerException if name is null.
+     * @throws NullPointerException if {@code name} is {@code null}.
+     * @throws IllegalArgumentException if {@code name} does not match allowed pattern.
      */
     public B setName(final String name) {
-        this.name = new String(name);
+        this.name = ThreadNames.sanitize(name);
         return self();
     }
 

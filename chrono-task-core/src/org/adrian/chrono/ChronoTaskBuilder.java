@@ -12,14 +12,16 @@ public class ChronoTaskBuilder extends AbstractTaskBuilder<ChronoTaskBuilder> {
 
 
     /**
+     * Creates a builder for a {@link ChronoTask} executed by the given executor.
+     * <p>
+     * <b>Avoid using strong references to external objects within the task. Strong
+     * references will keep objects in scope for the entire lifetime of this
+     * {@link ChronoTask}, preventing garbage collection and potentially causing
+     * memory leaks. Consider using weak references or ensuring proper cleanup
+     * when the {@link ChronoTask} is no longer needed.</b>
+     *
      * @param task the task to be executed by the timer.
      * @param executor the executor to run the timer and task.
-     * @warning Avoid using strong references to external objects within the task.
-     *          Strong references will keep objects in scope for the entire lifetime
-     *          of this {@link ChronoTask}, preventing garbage collection and
-     *          potentially causing memory leaks. Consider using weak references or
-     *          ensuring proper cleanup when the {@link ChronoTask} is no longer
-     *          needed.
      */
     protected ChronoTaskBuilder(final Consumer<ChronoTask> task, final AbstractExecutor executor) {
         super(executor);

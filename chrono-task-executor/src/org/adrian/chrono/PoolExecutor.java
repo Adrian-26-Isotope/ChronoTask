@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.adrian.chrono.util.ThreadNames;
 import org.adrian.threadpool.ElasticThreadPool;
 
 
@@ -41,15 +42,17 @@ public class PoolExecutor extends AbstractExecutor {
      * Constructs a new {@code TimedTaskPoolExecutor} with the specified name.
      * <p>
      * Initializes a {@link ElasticThreadPool} with minimum threads set to 0 and an
-     * idle time of 60 seconds.
+     * idle time of 60 seconds. The name is validated via
+     * {@link ThreadNames#sanitize(String)} before use.
      * </p>
      *
      * @param name the name of this executor
+     * @throws IllegalArgumentException if {@code name} does not match the allowed pattern.
      */
     public PoolExecutor(final String name) {
-        this.name = name;
-        this.threadPool =
-                ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60)).setName(name).start();
+        this.name = ThreadNames.sanitize(name);
+        this.threadPool = ElasticThreadPool.builder().setMinThreads(0).setIdleTime(Duration.ofSeconds(60))
+                .setName(this.name).start();
     }
 
     /**

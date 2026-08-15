@@ -95,7 +95,7 @@ class SystemTest {
     void testStopCancelsPendingFutureAndRestartProvidesFreshOne() throws InterruptedException {
         ThreadExecutor executor = new ThreadExecutor();
         FutureChronoTask<Integer> task =
-                executor.<Integer> createFutureTask(_ -> 42).setInitialDelay(Duration.ofSeconds(10)).build();
+                executor.<Integer> createFutureTask(_ -> 42).setInitialDelay(Duration.ofSeconds(2)).build();
 
         CompletableFuture<Integer> first = task.start();
         // stop before the 10s initial delay elapses: the consumer body never runs,
@@ -151,7 +151,7 @@ class SystemTest {
                 "rolling the task back to STOPPED instead of committing to RUNNING");
 
         task.stop();
-        Thread.sleep(200);
+        Thread.sleep(50);
 
         // the restart must NOT hang: run it on a separate thread and confirm it
         // completes quickly

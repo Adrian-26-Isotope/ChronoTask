@@ -64,6 +64,7 @@ public class FutureChronoTask<T> extends AbstractChronoTask {
         };
 
         this.chronoTask = executor.createTask(consumer).build();
+        this.chronoTask.setOnTermination(this::onTermination);
     }
 
     /**
@@ -98,6 +99,26 @@ public class FutureChronoTask<T> extends AbstractChronoTask {
     public synchronized void stop() {
         this.chronoTask.stop();
         this.nextResult.get().cancel(false);
+    }
+
+    /**
+     * Called when the underlying {@link ChronoTask} terminates on its own
+     * (e.g. a one-shot schedule completing) without an external {@link #stop()}.
+     * Cancels any orphan {@link CompletableFuture} left by the last execution's
+     * claim-and-replace so that {@link #getNextResult()} never hands out a
+     * future that hangs forever after the task has stopped.
+     * <p>
+     * This callback is invoked by {@code ChronoTask.fireTermination()}
+     * <em>outside</em> the {@code ChronoTask} monitor, so it is safe for this
+     * method to be {@code synchronized}. The {@link #isRunning()} guard
+     * ensures that if a new {@link #start()} has already transitioned the task
+     * back to {@code RUNNING}, the fresh future is not cancelled.
+     * </p>
+     */
+    private synchronized void onTermination() {
+        if (!isRunning()) {
+            this.nextResult.get().cancel(false);
+        }
     }
 
     /**

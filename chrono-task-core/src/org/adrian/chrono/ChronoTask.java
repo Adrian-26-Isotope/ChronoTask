@@ -1,3 +1,4 @@
+
 package org.adrian.chrono;
 
 import java.time.Duration;
@@ -42,6 +43,7 @@ public class ChronoTask extends AbstractChronoTask {
     private volatile Instant nextExecution;
     private volatile State state = State.STOPPED;
     private final Object executionLock = new Object();
+    private volatile Runnable onTermination;
 
 
     /**
@@ -55,40 +57,45 @@ public class ChronoTask extends AbstractChronoTask {
     /**
      * start the timer thread.
      */
-    public synchronized boolean start() {
-        while (getState() == State.SHUTDOWN) {
-            try {
-                wait();
+    public boolean start() {
+        synchronized (this) {
+            while (getState() == State.SHUTDOWN) {
+                try {
+                    wait();
+                }
+                catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
             }
-            catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
 
-        if (getState() == State.STOPPED) {
+            if (getState() != State.STOPPED) {
+                return false; // task is still running --> cannot be started again.
+            }
             setState(State.RUNNING);
             setNextExecutionTime(Instant.now(MONOTONIC_CLOCK).plus(this.initialDelay));
-            try {
-                if ((this.name == null) || this.name.isBlank()) {
-                    this.executor.run(this.timer::runTimer);
-                }
-                else {
-                    String timerName = "[" + this.name + "]Timer";
-                    this.executor.run(this.timer::runTimer, timerName);
-                }
+        }
+
+        try {
+            if ((this.name == null) || this.name.isBlank()) {
+                this.executor.run(this.timer::runTimer);
             }
-            catch (RejectedExecutionException _) {
-                // submission was dropped/rejected: roll back so the task cannot get stuck.
+            else {
+                String timerName = "[" + this.name + "]Timer";
+                this.executor.run(this.timer::runTimer, timerName);
+            }
+        }
+        catch (RejectedExecutionException _) {
+            // submission was dropped/rejected: roll back so the task cannot get stuck.
+            synchronized (this) {
                 setState(State.STOPPED);
                 setNextExecutionTime(null);
                 notifyAll();
-                return false;
             }
-            return true;
+            fireTermination();
+            return false;
         }
-
-        return false; // task is still running --> cannot be started again.
+        return true;
     }
 
     /**
@@ -105,13 +112,24 @@ public class ChronoTask extends AbstractChronoTask {
         }
     }
 
-    @Override
-    protected synchronized boolean setName(final String name) {
+    /**
+     * Applies a configuration mutation only while the task is not running.
+     *
+     * @param setter the configuration mutation to apply
+     * @return {@code true} if applied, {@code false} if the task is currently
+     *         running
+     */
+    private synchronized boolean applyIfStopped(final Runnable setter) {
         if (!isRunning()) {
-            this.name = name;
+            setter.run();
             return true;
         }
         return false;
+    }
+
+    @Override
+    protected boolean setName(final String name) {
+        return applyIfStopped(() -> this.name = name);
     }
 
     /**
@@ -123,9 +141,38 @@ public class ChronoTask extends AbstractChronoTask {
 
     /**
      * set a new state.
+     * <p>
+     * Callers that transition to {@link State#STOPPED} must invoke
+     * {@link #fireTermination()} <em>after</em> releasing the instance
+     * monitor so that registered callbacks run outside this lock.
+     * </p>
      */
     protected void setState(final State state) {
         this.state = state;
+    }
+
+    /**
+     * Registers a callback invoked when this task transitions to the
+     * {@link State#STOPPED} state. The callback runs once per transition, on the thread
+     * performing the transition, <em>outside</em> the instance monitor. It is
+     * therefore safe for the callback to acquire other monitors.
+     *
+     * @param listener the callback, or {@code null} to clear it
+     */
+    void setOnTermination(final Runnable listener) {
+        this.onTermination = listener;
+    }
+
+    /**
+     * Invokes the registered termination callback, if any. Must be called
+     * <em>after</em> the {@code synchronized} block that performed the
+     * {@link State#STOPPED} transition, i.e. outside the instance monitor.
+     */
+    private void fireTermination() {
+        final Runnable listener = this.onTermination;
+        if (listener != null) {
+            listener.run();
+        }
     }
 
     /**
@@ -153,30 +200,18 @@ public class ChronoTask extends AbstractChronoTask {
     }
 
     @Override
-    protected synchronized boolean setInitialDelay(final Duration delay) {
-        if (!isRunning()) {
-            this.initialDelay = delay;
-            return true;
-        }
-        return false;
+    protected boolean setInitialDelay(final Duration delay) {
+        return applyIfStopped(() -> this.initialDelay = delay);
     }
 
     @Override
-    protected synchronized boolean setSchedule(final Schedule schedule) {
-        if (!isRunning()) {
-            this.schedule.set(Objects.requireNonNull(schedule));
-            return true;
-        }
-        return false;
+    protected boolean setSchedule(final Schedule schedule) {
+        return applyIfStopped(() -> this.schedule.set(Objects.requireNonNull(schedule)));
     }
 
     @Override
-    protected synchronized boolean setMaxConcurrentExecutions(final int max) {
-        if (!isRunning()) {
-            this.executionThrottle.set(new Semaphore(max));
-            return true;
-        }
-        return false;
+    protected boolean setMaxConcurrentExecutions(final int max) {
+        return applyIfStopped(() -> this.executionThrottle.set(new Semaphore(max)));
     }
 
     /**
@@ -203,6 +238,7 @@ public class ChronoTask extends AbstractChronoTask {
                     // notify potential waiting restart.
                     ChronoTask.this.notifyAll();
                 }
+                fireTermination();
             }
         }
 
@@ -235,7 +271,10 @@ public class ChronoTask extends AbstractChronoTask {
                 }
                 catch (final Exception e) {
                     Thread current = Thread.currentThread();
-                    current.getUncaughtExceptionHandler().uncaughtException(current, e);
+                    Thread.UncaughtExceptionHandler handler = current.getUncaughtExceptionHandler();
+                    if (handler != null) {
+                        handler.uncaughtException(current, e);
+                    }
                 }
                 finally {
                     if (deferred) {

@@ -36,7 +36,7 @@ The library supports three execution modes: one-time with optional initial delay
 
 - **Three Execution Modes**: Supports one-time execution with optional initial delay, periodic (fixed-rate) execution, and repetitive (fixed-delay) execution to cover different scheduling scenarios.
 
-- **Flexible Executor Options**: Provide your own `AbstractExecutor` implementation for full control how tasks shall be executed, or choose between 2 built-in executors:
+- **Flexible Executor Options**: Provide your own `AbstractExecutor` implementation for full control how tasks shall be executed, or choose between 2 built-in executors (available in the `chrono-task-executor` module):
   -  `ThreadExecutor` for individual thread execution (using virtual threads by default) or
   -  `PoolExecutor` for efficient thread pool-based execution.
 
@@ -100,7 +100,7 @@ future = executor.scheduleAtFixedRate(task, 0, 1, TimeUnit.SECONDS);
 ```java
 // ChronoTask example
 ChronoTask task = executor.createTask(t -> doWork())
-    .setPeriodicDelay(Duration.ofSeconds(1))
+    .setSchedule(new Schedule.Periodic(Duration.ofSeconds(1)))
     .build();
 
 task.start();  // Start execution
@@ -117,9 +117,9 @@ task.start();  // Restart - same configuration
 - No built-in support for one-time execution with initial delay followed by different scheduling
 
 **ChronoTask**:
-- **Periodic mode** (via `setPeriodicDelay()`): Similar to `scheduleAtFixedRate()` - schedules next execution at fixed intervals from the start time, **regardless of task execution duration**
-- **Repetitive mode** (via `setRepetitiveDelay()`): Similar to `scheduleWithFixedDelay()` - waits for task completion before scheduling next execution with the specified delay
-- **One-time mode**: When neither periodic nor repetitive delay is set, task executes once after initial delay
+- **Periodic mode** (via `setSchedule(new Schedule.Periodic(...))`): Similar to `scheduleAtFixedRate()` - schedules next execution at fixed intervals from the start time, **regardless of task execution duration**
+- **Repetitive mode** (via `setSchedule(new Schedule.Repetitive(...))`): Similar to `scheduleWithFixedDelay()` - waits for task completion before scheduling next execution with the specified delay
+- **One-time mode** (via `setSchedule(new Schedule.OneShot())`, the default): When neither periodic nor repetitive delay is set, task executes once after initial delay
 - All modes support optional `setInitialDelay()` for consistent delayed start behavior
 - Mode is configuration-based rather than method-based
 
@@ -127,16 +127,16 @@ task.start();  // Restart - same configuration
 // Periodic: Fixed-rate execution
 ChronoTask periodic = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
-    .setPeriodicDelay(Duration.ofSeconds(10))
+    .setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
     .build();
 
 // Repetitive: Fixed-delay execution
 ChronoTask repetitive = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
-    .setRepetitiveDelay(Duration.ofSeconds(10))
+    .setSchedule(new Schedule.Repetitive(Duration.ofSeconds(10)))
     .build();
 
-// One-time: Single execution after delay
+// One-time: Single execution after delay (Schedule.OneShot is the default)
 ChronoTask oneTime = executor.createTask(t -> doWork())
     .setInitialDelay(Duration.ofSeconds(5))
     .build();
@@ -153,7 +153,7 @@ to no overlap at all:
 ```java
 // Allow at most 2 overlapping executions of a slow periodic task
 TimedTask bounded = executor.createTask(t -> doSlowWork())
-    .setPeriodicDelay(Duration.ofSeconds(1))
+    .setSchedule(new Schedule.Periodic(Duration.ofSeconds(1)))
     .setMaxConcurrentExecutions(2)
     .build();
 ```
@@ -179,14 +179,14 @@ TimedTask bounded = executor.createTask(t -> doSlowWork())
 ThreadExecutor threadExec = new ThreadExecutor();
 ChronoTask task1 = threadExec.createTask(t -> doWork())
     .setName("DatabaseSync")
-    .setPeriodicDelay(Duration.ofMinutes(5))
+    .setSchedule(new Schedule.Periodic(Duration.ofMinutes(5)))
     .build();
 
 // Option 2: Shared thread pool
 PoolExecutor poolExec = new PoolExecutor("MyTaskPool");
 ChronoTask task2 = poolExec.createTask(t -> doWork())
     .setName("CacheCleanup")
-    .setPeriodicDelay(Duration.ofMinutes(10))
+    .setSchedule(new Schedule.Periodic(Duration.ofMinutes(10)))
     .build();
 
 // Option 3: Custom executor implementation
@@ -262,7 +262,7 @@ ChronoTask task = executor.createTask(t -> {
     }
 })
 .setName("DataProcessor")
-.setPeriodicDelay(Duration.ofSeconds(30))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(30)))
 .build();
 
 // Start the task
@@ -303,7 +303,7 @@ if (!task.isRunning()) {
 | **Restart** | Must resubmit task | Built-in `stop()` and `start()` again |
 | **Execution Strategy** | Fixed thread pool | Pluggable executors |
 | **Thread Management** | Shared pool for all tasks | Flexible depending on execution strategy |
-| **Timing Modes** | Method-based (`scheduleAtFixedRate` vs `scheduleWithFixedDelay`) | Configuration-based (`setPeriodicDelay` vs `setRepetitiveDelay`) |
+| **Timing Modes** | Method-based (`scheduleAtFixedRate` vs `scheduleWithFixedDelay`) | Configuration-based (`setSchedule(new Schedule.Periodic(...))` vs `setSchedule(new Schedule.Repetitive(...))`) |
 | **State Inspection** | `isDone()`, `isCancelled()` | `isRunning()` |
 | **Future / Result API** | `ScheduledFuture` (control only) | `FutureChronoTask<T>` — `CompletableFuture<T>` per execution |
 | **Task Self-Reference** | No | Yes |
@@ -344,11 +344,10 @@ The `ChronoTask` class is the central component representing an individual sched
   - `SHUTDOWN`: Transitional state — `stop()` has been called; timer thread is winding down
   - `STOPPED`: Task is fully stopped
 
-- **Timing Configuration**: Holds three optional `Duration` fields:
+- **Timing Configuration**: Holds an `initialDelay` (`Duration`) and a `Schedule` that determines the recurrence policy:
   - `initialDelay`: Delay before the first execution
-  - `periodicDelay`: Fixed-rate interval between execution starts (scheduled at fixed intervals)
-  - `repetitiveDelay`: Fixed-delay interval after execution completion
-  - `maxConcurrentExecutions`: Bounds concurrent overlap in periodic mode (default unbounded); see `setMaxConcurrentExecutions()`
+  - `schedule`: A sealed `Schedule` type — `Schedule.Periodic` (fixed-rate), `Schedule.Repetitive` (fixed-delay), or `Schedule.OneShot` (single execution, the default). The schedule encapsulates the next-execution-time policy and is mutually exclusive by construction.
+  - `maxConcurrentExecutions`: Bounds concurrent overlap in periodic mode (default 1000); see `setMaxConcurrentExecutions()`
 
 - **Internal Timer**: Contains a nested `Timer` class that manages the scheduling logic on a dedicated timer thread.
 
@@ -365,8 +364,8 @@ The `ChronoTask` class is the central component representing an individual sched
 The `ChronoTaskBuilder` class implements the Builder pattern for fluent, type-safe task configuration. It:
 
 - **Enforces Required Parameters**: Mandates `Consumer<ChronoTask>` task and `AbstractExecutor` at construction
-- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`, `setMaxConcurrentExecutions()`)
-- **Validates Configuration**: Ensures mutually exclusive execution modes (periodic vs. repetitive)
+- **Provides Fluent API**: Method chaining for optional parameters (`setInitialDelay()`, `setSchedule()`, `setName()`, `setMaxConcurrentExecutions()`)
+- **Validates Configuration**: Ensures a valid, non-null `Schedule` (mutual exclusion is guaranteed by construction — one field, one type)
 - **Prevents Memory Leaks**: Creates defensive copies of all `Duration` and `String` parameters to decouple from external references
 - **Builds Immutable Tasks**: Constructs fully configured `ChronoTask` instances via `build()`
 
@@ -444,13 +443,15 @@ The `AbstractExecutor` is an abstract base class that defines the execution stra
 - `start()` is `synchronized` and returns the currently-exposed future before starting the underlying task
 - Instances are created via `executor.createFutureTask(Function<FutureChronoTask<T>, T>)` and `FutureChronoTaskBuilder<T>.build()`
 
+
 #### 7. FutureChronoTaskBuilder\<T\>
 
 The `FutureChronoTaskBuilder<T>` class mirrors `ChronoTaskBuilder` for `FutureChronoTask<T>`.
 
-- **Same fluent API**: `setInitialDelay()`, `setPeriodicDelay()`, `setRepetitiveDelay()`, `setName()`, `setMaxConcurrentExecutions()`
+- **Same fluent API**: `setInitialDelay()`, `setSchedule(Schedule)`, `setName()`, `setMaxConcurrentExecutions()`
 - **Builds `FutureChronoTask<T>`**: Constructs fully configured instances via `build()`
 - **Protected constructor**: Instantiated exclusively through `AbstractExecutor.createFutureTask(Function)`
+
 
 ### Component Interaction
 
@@ -489,8 +490,7 @@ The following diagram illustrates how components interact during typical task li
                       │  3. Configure task:    │
                       │  • setName()           │
                       │  • setInitialDelay()   │
-                      │  • setPeriodicDelay()  │
-                      │  • setRepetitiveDelay()│
+                      │  • setSchedule()       │
                       └──────────┬─────────────┘
                                  │
                                  │ 4. build()
@@ -670,7 +670,7 @@ ChronoTask task = executor.createTask(t -> {
     System.out.println("Task executed!");
 })
 .setName("MyTask")
-.setPeriodicDelay(Duration.ofSeconds(5))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(5)))
 .build();
 
 // Start the task
@@ -719,14 +719,14 @@ ChronoTask task1 = executor.createTask(t -> {
     processData();
 })
 .setName("DataProcessor")
-.setPeriodicDelay(Duration.ofMinutes(1))
+.setSchedule(new Schedule.Periodic(Duration.ofMinutes(1)))
 .build();
 
 ChronoTask task2 = executor.createTask(t -> {
     cleanupCache();
 })
 .setName("CacheCleanup")
-.setPeriodicDelay(Duration.ofMinutes(5))
+.setSchedule(new Schedule.Periodic(Duration.ofMinutes(5)))
 .build();
 
 // Start both tasks
@@ -772,7 +772,7 @@ ChronoTask task = executor.createTask(t -> {
 
 ### Execution Modes
 
-ChronoTask supports three distinct execution modes, configured through the builder API. The mode is determined by which delay methods you call on the builder.
+ChronoTask supports three distinct execution modes, configured through the builder API. The mode is determined by the schedule you set on the builder.
 
 #### One-Time Execution with Initial Delay
 
@@ -780,7 +780,7 @@ A one-time task executes exactly once after an optional initial delay, then auto
 
 **Configuration:**
 - Set only `setInitialDelay()` (or set neither delay)
-- Do not set `setPeriodicDelay()` or `setRepetitiveDelay()`
+- Do not set a periodic or repetitive schedule via `setSchedule(new Schedule.Periodic(...))` or `setSchedule(new Schedule.Repetitive(...))`
 
 **Example:**
 
@@ -815,7 +815,7 @@ delayed.start();
 Periodic execution schedules tasks at **fixed intervals from the start time**, similar to `ScheduledExecutorService.scheduleAtFixedRate()`. The next execution is scheduled immediately when the current execution starts, regardless of how long the execution takes.
 
 **Configuration:**
-- Call `setPeriodicDelay(Duration)` on the builder
+- Call `setSchedule(new Schedule.Periodic(Duration))` on the builder
 - Optionally add `setInitialDelay()` for delayed start
 
 **Example:**
@@ -825,7 +825,7 @@ Periodic execution schedules tasks at **fixed intervals from the start time**, s
 ChronoTask periodic = executor.createTask(t -> {
     performPeriodicCheck();
 })
-.setPeriodicDelay(Duration.ofSeconds(10))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
 .build();
 
 periodic.start();
@@ -835,7 +835,7 @@ ChronoTask delayedPeriodic = executor.createTask(t -> {
     syncData();
 })
 .setInitialDelay(Duration.ofSeconds(30))
-.setPeriodicDelay(Duration.ofMinutes(1))
+.setSchedule(new Schedule.Periodic(Duration.ofMinutes(1)))
 .build();
 
 delayedPeriodic.start();
@@ -878,7 +878,7 @@ Execute: X===  |     |     |
 Repetitive execution schedules the next execution **after the previous execution completes**, similar to `ScheduledExecutorService.scheduleWithFixedDelay()`. This guarantees a specific delay between task completions and starts.
 
 **Configuration:**
-- Call `setRepetitiveDelay(Duration)` on the builder
+- Call `setSchedule(new Schedule.Repetitive(Duration))` on the builder
 - Optionally add `setInitialDelay()` for delayed start
 
 **Example:**
@@ -888,7 +888,7 @@ Repetitive execution schedules the next execution **after the previous execution
 ChronoTask repetitive = executor.createTask(t -> {
     processQueue(); // May take variable time
 })
-.setRepetitiveDelay(Duration.ofSeconds(5))
+.setSchedule(new Schedule.Repetitive(Duration.ofSeconds(5)))
 .build();
 
 repetitive.start();
@@ -898,7 +898,7 @@ ChronoTask delayedRepetitive = executor.createTask(t -> {
     performMaintenance();
 })
 .setInitialDelay(Duration.ofSeconds(10))
-.setRepetitiveDelay(Duration.ofSeconds(30))
+.setSchedule(new Schedule.Repetitive(Duration.ofSeconds(30)))
 .build();
 
 delayedRepetitive.start();
@@ -1154,7 +1154,7 @@ ChronoTask task = executor.createTask(t -> {
     System.out.println("Executed at: " + LocalDateTime.now());
 })
 .setInitialDelay(Duration.ofSeconds(5))
-.setPeriodicDelay(Duration.ofSeconds(10))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
 .build();
 
 System.out.println("Starting at: " + LocalDateTime.now());
@@ -1192,7 +1192,7 @@ ChronoTask task = executor.createTask(t -> {
     Thread.sleep(3000);  // Simulates long-running work
     System.out.println("End execution: " + LocalDateTime.now());
 })
-.setPeriodicDelay(Duration.ofSeconds(5))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(5)))
 .build();
 
 task.start();
@@ -1238,7 +1238,7 @@ Use the `isRunning()` method to check if a task is actively running.
 ChronoTask primaryTask = executor.createTask(t -> {
     System.out.println("Primary task running");
 })
-.setPeriodicDelay(Duration.ofSeconds(5))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(5)))
 .build();
 
 ChronoTask secondaryTask = executor.createTask(t -> {
@@ -1250,7 +1250,7 @@ ChronoTask secondaryTask = executor.createTask(t -> {
         t.stop();  // Stop self
     }
 })
-.setPeriodicDelay(Duration.ofSeconds(2))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(2)))
 .build();
 
 primaryTask.start();
@@ -1279,7 +1279,7 @@ ChronoTask selfStoppingTask = executor.createTask(t -> {
         t.stop();  // Task stops itself
     }
 })
-.setPeriodicDelay(Duration.ofSeconds(1))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(1)))
 .build();
 
 selfStoppingTask.start();
@@ -1298,7 +1298,7 @@ ChronoTask monitoringTask = executor.createTask(t -> {
 
     System.out.println("System healthy");
 })
-.setPeriodicDelay(Duration.ofSeconds(10))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
 .build();
 
 monitoringTask.start();
@@ -1375,7 +1375,7 @@ FutureChronoTask<Integer> task = executor.createFutureTask(t -> {
     return computeMetric();
 })
 .setName("MetricCollector")
-.setPeriodicDelay(Duration.ofSeconds(10))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
 .build();
 
 CompletableFuture<Integer> next = task.start();
@@ -1600,7 +1600,7 @@ public class ServiceManager {
             // This closure captures 'this', which includes dataService
             dataService.checkHealth();
         })
-        .setPeriodicDelay(Duration.ofSeconds(10))
+        .setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
         .build();
 
         monitor.start();
@@ -1642,7 +1642,7 @@ public class ServiceManager {
                 t.stop();  // Stop task when service is gone
             }
         })
-        .setPeriodicDelay(Duration.ofSeconds(10))
+        .setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
         .build();
 
         monitor.start();
@@ -1674,7 +1674,7 @@ public class ServiceManager {
             // This doesn't capture ServiceManager instance
             MonitoringUtils.checkHealth(serviceId);
         })
-        .setPeriodicDelay(Duration.ofSeconds(10))
+        .setSchedule(new Schedule.Periodic(Duration.ofSeconds(10)))
         .build();
 
         monitor.start();
@@ -1722,7 +1722,7 @@ ChronoTask task = executor.createTask(t -> {
     } else if (resource != null) {
         resource.doWork();
     }
-}).setPeriodicDelay(Duration.ofSeconds(10)).build();
+}).setSchedule(new Schedule.Periodic(Duration.ofSeconds(10))).build();
 ```
 
 ## Best Practices
@@ -1755,7 +1755,7 @@ public class DataService {
                 System.out.println("Service no longer available");
                 t.stop();
             }
-        }).setPeriodicDelay(Duration.ofMinutes(1)).build();
+        }).setSchedule(new Schedule.Periodic(Duration.ofMinutes(1))).build();
 
         task.start();
         // largeDataBuffer can now be GC'd when service instance is no longer needed
@@ -1778,7 +1778,7 @@ public class DataService {
         ChronoTask task = executor.createTask(t -> {
             // Only 'id' is captured, not 'this'
             checkStatusById(id);
-        }).setPeriodicDelay(Duration.ofMinutes(1)).build();
+        }).setSchedule(new Schedule.Periodic(Duration.ofMinutes(1))).build();
 
         task.start();
     }
@@ -1818,7 +1818,7 @@ public class DataProcessor {
 
     public void start() {
         processingTask = executor.createTask(t -> processData())
-            .setPeriodicDelay(Duration.ofMinutes(5))
+            .setSchedule(new Schedule.Periodic(Duration.ofMinutes(5)))
             .build();
 
         processingTask.start();
@@ -1886,7 +1886,7 @@ ChronoTask healthCheck = executor.createTask(t -> {
     boolean healthy = checkServiceHealth();
     logHealth(healthy);
 })
-.setPeriodicDelay(Duration.ofSeconds(30))
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(30)))
 .build();
 
 // Result: Checks run exactly every 30 seconds
@@ -1908,7 +1908,7 @@ ChronoTask batchProcessor = executor.createTask(t -> {
     // Variable duration: 100ms to 10 seconds
     processBatchFromQueue();  // Duration depends on batch size
 })
-.setRepetitiveDelay(Duration.ofSeconds(5))
+.setSchedule(new Schedule.Repetitive(Duration.ofSeconds(5)))
 .build();
 
 // Result: 5-second rest between batches, no overlaps
@@ -1928,7 +1928,7 @@ ChronoTask batchProcessor = executor.createTask(t -> {
 ChronoTask periodicTask = executor.createTask(t -> {
     Thread.sleep(7000);  // Task takes 7 seconds
 })
-.setPeriodicDelay(Duration.ofSeconds(5))  // But period is 5 seconds
+.setSchedule(new Schedule.Periodic(Duration.ofSeconds(5)))  // But period is 5 seconds
 .build();
 // Result: Multiple tasks run simultaneously!
 // Time:  0s   5s   7s   10s  12s  15s  17s
@@ -1942,7 +1942,7 @@ ChronoTask periodicTask = executor.createTask(t -> {
 ChronoTask repetitiveTask = executor.createTask(t -> {
     Thread.sleep(7000);  // Task takes 7 seconds
 })
-.setRepetitiveDelay(Duration.ofSeconds(5))  // 5 seconds after completion
+.setSchedule(new Schedule.Repetitive(Duration.ofSeconds(5)))  // 5 seconds after completion
 .build();
 // Result: Tasks never overlap
 // Time:  0s   7s   12s  19s  24s
@@ -2123,14 +2123,39 @@ ChronoTask task = executor.createTask(t -> {
 // (immediately clear what each thread does!)
 ```
 
+## Module Structure
+
+ChronoTask is split into two Maven modules:
+
+| Module | ArtifactId | Description | Dependencies |
+|--------|-----------|-------------|--------------|
+| Core | `chrono-task-core` | Task scheduling framework: `ChronoTask`, `FutureChronoTask`, `Schedule`, builders, `AbstractExecutor` | None (pure JDK) |
+| Executor | `chrono-task-executor` | Concrete executor implementations: `ThreadExecutor`, `PoolExecutor` | `chrono-task-core`, [ElasticThreadPool](https://github.com/Adrian-26-Isotope/ElasticThreadPool) |
+
+**Using only the core module** (no external dependencies):
+
+```xml
+<dependency>
+    <groupId>org.adrian</groupId>
+    <artifactId>chrono-task-core</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
+**Using the executor module** (includes `ThreadExecutor` and `PoolExecutor`):
+
+```xml
+<dependency>
+    <groupId>org.adrian</groupId>
+    <artifactId>chrono-task-executor</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+
 ## Requirements
 
 - Java 25+
 - JUnit 5
-
-## Dependencies
-
-- [ElasticThreadPool](https://github.com/Adrian-26-Isotope/ElasticThreadPool) (maven dependency)
 
 ## License
 

@@ -23,7 +23,7 @@ import java.util.function.Function;
  *
  * @param <T> the type of the result produced by the task.
  */
-public class FutureChronoTask<T> {
+public class FutureChronoTask<T> extends AbstractChronoTask {
 
     private final ChronoTask chronoTask;
     private final AtomicReference<CompletableFuture<T>> nextResult;
@@ -47,25 +47,31 @@ public class FutureChronoTask<T> {
             catch (final Exception e) {
                 failure = e;
             }
-            CompletableFuture<T> currentFuture = this.nextResult.getAndSet(new CompletableFuture<>());
-            if (failure == null) {
-                this.lastResult = result;
-                currentFuture.complete(result);
-            }
-            else {
-                currentFuture.completeExceptionally(failure);
+            synchronized (FutureChronoTask.this) {
+                CompletableFuture<T> currentFuture = FutureChronoTask.this.nextResult.get();
+                if (currentFuture.isDone()) {
+                    return;
+                }
+                FutureChronoTask.this.nextResult.set(new CompletableFuture<>());
+                if (failure == null) {
+                    FutureChronoTask.this.lastResult = result;
+                    currentFuture.complete(result);
+                }
+                else {
+                    currentFuture.completeExceptionally(failure);
+                }
             }
         };
 
         this.chronoTask = executor.createTask(consumer).build();
+        this.chronoTask.setOnTermination(this::onTermination);
     }
 
     /**
      * Starts the task and returns the {@link CompletableFuture} for the next
      * upcoming execution. If the task was previously stopped before its prior
-     * {@code start()}'s execution ever fired, that same future instance is
-     * reused rather than replaced, since it was never completed; it will be
-     * completed by whichever execution runs next.
+     * {@code start()}'s execution ever fired, the cancelled future is replaced
+     * with a fresh one, since {@link #stop()} cancels any pending future.
      *
      * @return the future that will be completed by the next execution, or
      *         {@code null} if the task is already running or failed to start
@@ -75,16 +81,44 @@ public class FutureChronoTask<T> {
             return null;
         }
         CompletableFuture<T> next = getNextResult();
+        if (next.isDone()) {
+            next = new CompletableFuture<>();
+            this.nextResult.set(next);
+        }
         boolean started = this.chronoTask.start();
         return started ? next : null;
     }
 
     /**
      * Stops any recurring executions and terminates this task gracefully. Once
-     * stopped the task can be started again via {@link #start()}.
+     * stopped the task can be started again via {@link #start()}. Any pending
+     * {@link CompletableFuture} is cancelled so that a caller waiting on
+     * {@code get()} does not hang forever; the result of an in-flight execution
+     * that has not yet claimed the future is discarded.
      */
-    public void stop() {
+    public synchronized void stop() {
         this.chronoTask.stop();
+        this.nextResult.get().cancel(false);
+    }
+
+    /**
+     * Called when the underlying {@link ChronoTask} terminates on its own
+     * (e.g. a one-shot schedule completing) without an external {@link #stop()}.
+     * Cancels any orphan {@link CompletableFuture} left by the last execution's
+     * claim-and-replace so that {@link #getNextResult()} never hands out a
+     * future that hangs forever after the task has stopped.
+     * <p>
+     * This callback is invoked by {@code ChronoTask.fireTermination()}
+     * <em>outside</em> the {@code ChronoTask} monitor, so it is safe for this
+     * method to be {@code synchronized}. The {@link #isRunning()} guard
+     * ensures that if a new {@link #start()} has already transitioned the task
+     * back to {@code RUNNING}, the fresh future is not cancelled.
+     * </p>
+     */
+    private synchronized void onTermination() {
+        if (!isRunning()) {
+            this.nextResult.get().cancel(false);
+        }
     }
 
     /**
@@ -125,53 +159,22 @@ public class FutureChronoTask<T> {
         return this.nextResult.get();
     }
 
-    /**
-     * @param delay the initial delay before the first execution; ignored when
-     *            negative
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setInitialDelay(final Duration delay) {
         return this.chronoTask.setInitialDelay(delay);
     }
 
-    /**
-     * Periodic delay means the task executes at fixed intervals from the start
-     * time. Clears any repetitive delay.
-     *
-     * @param delay the fixed delay between task executions
-     * @return false if the task is currently running
-     */
-    protected boolean setPeriodicDelay(final Duration delay) {
-        return this.chronoTask.setPeriodicDelay(delay);
+    @Override
+    protected boolean setSchedule(final Schedule schedule) {
+        return this.chronoTask.setSchedule(schedule);
     }
 
-    /**
-     * Repetitive delay means the task executes with a fixed delay after the
-     * previous execution completes. Clears any periodic delay.
-     *
-     * @param delay the delay between consecutive task executions
-     * @return false if the task is currently running
-     */
-    protected boolean setRepetitiveDelay(final Duration delay) {
-        return this.chronoTask.setRepetitiveDelay(delay);
-    }
-
-    /**
-     * @param name the name of the task
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setName(final String name) {
         return this.chronoTask.setName(name);
     }
 
-    /**
-     * Bounds how many executions of this task may run concurrently. Only relevant
-     * in periodic mode, where a slow task can otherwise overlap with subsequent
-     * firings; defaults to unbounded ({@link Integer#MAX_VALUE}).
-     *
-     * @param max the maximum number of concurrent executions to allow
-     * @return false if the task is currently running
-     */
+    @Override
     protected boolean setMaxConcurrentExecutions(final int max) {
         return this.chronoTask.setMaxConcurrentExecutions(max);
     }

@@ -30,7 +30,7 @@ replay_pid*
 
 # IDE specifics
 **/.settings/
-.classpath
-.project
+**/.classpath
+**/.project
 mvn-jdk25.bat
 /.mvn

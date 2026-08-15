@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -95,7 +96,7 @@ class FutureChronoTaskTest {
 
         CompletableFuture<Integer> future = task.start();
         // Wait long enough for the task to execute
-        Thread.sleep(200);
+        Thread.sleep(50);
 
         assertTrue(future.isCompletedExceptionally(), "Future should be completed exceptionally");
         ExecutionException ex = assertThrows(ExecutionException.class, () -> future.get());
@@ -115,7 +116,7 @@ class FutureChronoTaskTest {
         }).build();
 
         CompletableFuture<Integer> future = task.start();
-        Thread.sleep(200);
+        Thread.sleep(50);
 
         assertTrue(future.isCompletedExceptionally());
         assertTrue(task.getLastResult().isEmpty(), "getLastResult() should remain empty after a failed execution");
@@ -146,23 +147,30 @@ class FutureChronoTaskTest {
      * Tests that the future returned by start() is completed by whichever
      * overlapping execution finishes first (completion order), not necessarily by
      * the execution that started first. The first invocation is slow and keeps
+     * <<<<<<<< HEAD:src-test/org/adrian/chrono/FutureChronoTaskTest.java
      * running while the second, fast invocation completes first and self-stops the
      * task to keep the scenario deterministic.
+     * ========
+     * running while the second, fast invocation completes first.
+     * >>>>>>>>
+     * bugfixing:chrono-task-executor/src-test/org/adrian/chrono/FutureChronoTaskTest.java
      */
     @ParameterizedTest
     @MethodSource("executorProvider")
     void testNextResultCompletesInFinishOrderNotStartOrder(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
         AtomicInteger counter = new AtomicInteger(0);
-        FutureChronoTask<String> task = executor.<String>createFutureTask(self -> {
+        FutureChronoTask<String> task = executor.<String>createFutureTask(_ -> {
             int n = counter.incrementAndGet();
             if (n == 1) {
-                sleepUninterruptibly(400);
-                return "slow";
+                sleepUninterruptibly(200);
+                return "slow-" + n;
             }
-            sleepUninterruptibly(20);
-            self.stop();
-            return "fast-" + n;
+            if (n == 2) {
+                sleepUninterruptibly(20);
+                return "fast-" + n;
+            }
+            return "extra";
         }).setPeriodicDelay(Duration.ofMillis(150)).build();
 
         CompletableFuture<String> first = task.start();
@@ -171,15 +179,19 @@ class FutureChronoTaskTest {
                 "Future from start() should be completed by the first execution to finish, not the first to start");
 
         CompletableFuture<String> next = task.getNextResult();
-        assertEquals("slow", next.get(1, TimeUnit.SECONDS),
+        assertEquals("slow-1", next.get(1, TimeUnit.SECONDS),
                 "Following future should still be completed by the slow execution once it finishes");
+
+        next = task.getNextResult();
+        assertEquals("extra", next.get(1, TimeUnit.SECONDS));
+
+        task.stop();
     }
 
     private static void sleepUninterruptibly(final long millis) {
         try {
             Thread.sleep(millis);
-        }
-        catch (final InterruptedException e) {
+        } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
         }
     }
@@ -191,8 +203,8 @@ class FutureChronoTaskTest {
     @MethodSource("executorProvider")
     void testStartOnAlreadyRunningTaskReturnsNull(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        FutureChronoTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         CompletableFuture<Integer> first = task.start();
         assertNotNull(first, "First start() should return a non-null future");
@@ -259,13 +271,13 @@ class FutureChronoTaskTest {
     @MethodSource("executorProvider")
     void testInitialDelay(final AbstractExecutor executor) throws Exception {
         this.currentExecutor = executor;
-        FutureChronoTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 7).setInitialDelay(Duration.ofMillis(400)).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 7)
+                .setInitialDelay(Duration.ofMillis(100)).build();
 
         CompletableFuture<Integer> future = task.start();
         assertFalse(future.isDone(), "Future should not be done immediately after start (initial delay)");
 
-        Thread.sleep(200);
+        Thread.sleep(50);
         assertFalse(future.isDone(), "Future should not be done before initial delay expires");
 
         assertEquals(7, future.get(1, TimeUnit.SECONDS), "Future should complete after initial delay");
@@ -299,8 +311,8 @@ class FutureChronoTaskTest {
     @MethodSource("executorProvider")
     void testIsRunning(final AbstractExecutor executor) {
         this.currentExecutor = executor;
-        FutureChronoTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setPeriodicDelay(Duration.ofSeconds(10)).build();
 
         assertFalse(task.isRunning(), "Task should not be running before start()");
         task.start();
@@ -352,34 +364,31 @@ class FutureChronoTaskTest {
     /**
      * Tests that a negative initial delay throws IllegalArgumentException.
      */
-    @ParameterizedTest
-    @MethodSource("executorProvider")
-    void testNegativeInitialDelayThrows(final AbstractExecutor executor) {
-        this.currentExecutor = executor;
+    @Test
+    void testNegativeInitialDelayThrows() {
+        this.currentExecutor = new ThreadExecutor();
         assertThrows(IllegalArgumentException.class,
-                () -> executor.createFutureTask(_ -> 1).setInitialDelay(Duration.ofMillis(-100)));
+                () -> this.currentExecutor.createFutureTask(_ -> 1).setInitialDelay(Duration.ofMillis(-100)));
     }
 
     /**
      * Tests that a negative periodic delay throws IllegalArgumentException.
      */
-    @ParameterizedTest
-    @MethodSource("executorProvider")
-    void testNegativePeriodicDelayThrows(final AbstractExecutor executor) {
-        this.currentExecutor = executor;
+    @Test
+    void testNegativePeriodicDelayThrows() {
+        this.currentExecutor = new ThreadExecutor();
         assertThrows(IllegalArgumentException.class,
-                () -> executor.createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofMillis(-100)));
+                () -> this.currentExecutor.createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofMillis(-100)));
     }
 
     /**
      * Tests that a negative repetitive delay throws IllegalArgumentException.
      */
-    @ParameterizedTest
-    @MethodSource("executorProvider")
-    void testNegativeRepetitiveDelayThrows(final AbstractExecutor executor) {
-        this.currentExecutor = executor;
+    @Test
+    void testNegativeRepetitiveDelayThrows() {
+        this.currentExecutor = new ThreadExecutor();
         assertThrows(IllegalArgumentException.class,
-                () -> executor.createFutureTask(_ -> 1).setRepetitiveDelay(Duration.ofMillis(-100)));
+                () -> this.currentExecutor.createFutureTask(_ -> 1).setRepetitiveDelay(Duration.ofMillis(-100)));
     }
 
     /**
@@ -398,10 +407,10 @@ class FutureChronoTaskTest {
                 self.stop();
             }
             return n;
-        }).setRepetitiveDelay(Duration.ofMillis(50)).build();
+        }).setRepetitiveDelay(Duration.ofMillis(20)).build();
 
         task.start();
-        Thread.sleep(500);
+        Thread.sleep(100);
 
         assertFalse(task.isRunning(), "Task should have self-terminated");
         assertEquals(limit, counter.get(), "Counter should equal limit after self-termination");
@@ -435,14 +444,98 @@ class FutureChronoTaskTest {
         assertThrows(IllegalArgumentException.class,
                 () -> executor.createFutureTask(_ -> 1).setMaxConcurrentExecutions(-1));
 
-        FutureChronoTask<Integer> task =
-                executor.<Integer>createFutureTask(_ -> 1).setPeriodicDelay(Duration.ofSeconds(10)).build();
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setPeriodicDelay(Duration.ofSeconds(2)).build();
         task.start();
-        Thread.sleep(150);
+        Thread.sleep(50);
 
         assertFalse(task.setMaxConcurrentExecutions(2),
                 "setMaxConcurrentExecutions() should return false while the task is running");
 
+        task.stop();
+    }
+
+    /**
+     * Tests that stop() cancels a pending future so a caller's get() does not
+     * hang forever.
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testStopCancelsPendingFuture(final AbstractExecutor executor) throws Exception {
+        this.currentExecutor = executor;
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 1)
+                .setInitialDelay(Duration.ofSeconds(2)).build();
+
+        CompletableFuture<Integer> future = task.start();
+        assertFalse(future.isDone(), "future should not be done before stop()");
+
+        task.stop();
+        Thread.sleep(50);
+
+        assertTrue(future.isCancelled(), "pending future should be cancelled by stop()");
+        assertThrows(CancellationException.class, () -> future.get(1, TimeUnit.SECONDS));
+    }
+
+    /**
+     * Tests that after a one-shot task self-terminates internally (its
+     * {@link Schedule.OneShot} completes and the timer stops on its own),
+     * the orphan {@link CompletableFuture} left by the last execution's
+     * claim-and-replace is cancelled, so {@link #getNextResult()} does not
+     * hand out a future that hangs forever. (F31)
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testOneShotSelfTerminationCancelsOrphanFuture(final AbstractExecutor executor) throws Exception {
+        this.currentExecutor = executor;
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> 42).build();
+
+        CompletableFuture<Integer> first = task.start();
+        assertEquals(42, first.get(1, TimeUnit.SECONDS), "First execution should complete with the result");
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (task.isRunning() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertFalse(task.isRunning(), "One-shot task should have self-terminated");
+        Thread.sleep(50);
+
+        CompletableFuture<Integer> orphan = task.getNextResult();
+        long orphanDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!orphan.isDone() && System.nanoTime() < orphanDeadline) {
+            Thread.sleep(10);
+        }
+        assertTrue(orphan.isDone(), "Orphan future should be cancelled after self-termination, not hang forever");
+        assertTrue(orphan.isCancelled(), "Orphan future should be cancelled");
+    }
+
+    /**
+     * Tests that restarting a task after it self-terminates returns a usable
+     * (non-cancelled) future. This guards against the race where the
+     * termination callback cancels a future that belongs to the new
+     * lifecycle. (F31)
+     */
+    @ParameterizedTest
+    @MethodSource("executorProvider")
+    void testRestartAfterSelfTerminationReturnsUsableFuture(final AbstractExecutor executor) throws Exception {
+        this.currentExecutor = executor;
+        AtomicInteger callCount = new AtomicInteger(0);
+        FutureChronoTask<Integer> task = executor.<Integer>createFutureTask(_ -> callCount.incrementAndGet())
+                .build();
+
+        CompletableFuture<Integer> first = task.start();
+        assertEquals(1, first.get(1, TimeUnit.SECONDS));
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (task.isRunning() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        assertFalse(task.isRunning(), "One-shot task should have self-terminated");
+        Thread.sleep(50);
+
+        CompletableFuture<Integer> second = task.start();
+        assertNotNull(second, "restart after self-termination should succeed");
+        assertFalse(second.isCancelled(), "restart future must not be cancelled");
+        assertEquals(2, second.get(1, TimeUnit.SECONDS), "restart future should complete with new result");
         task.stop();
     }
 }
